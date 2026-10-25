@@ -3,145 +3,114 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Sun & Shadow Study</title>
+<title>Sun & Shadow · a_tools</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="../../assets/atools.css">
 <style>
-  :root {
-    --bg: #f7f6f3; --panel: #ffffff; --ink: #1d1d1b; --muted: #6b6a66; --line: #dddbd5;
-    --accent: #d9822b; --shadow: #2c3e66; --plot: #c0392b;
-  }
-  * { box-sizing: border-box; }
-  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink);
-    font: 14px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
-  .app { display: grid; grid-template-columns: 340px 1fr; height: 100vh; }
-  aside { background: var(--panel); border-right: 1px solid var(--line); overflow-y: auto; padding: 16px; }
-  h1 { font-size: 18px; margin: 0 0 4px; }
-  .sub { color: var(--muted); margin: 0 0 16px; font-size: 13px; }
-  section { border-top: 1px solid var(--line); padding: 12px 0; }
-  section h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 8px; }
-  label { display: block; font-size: 13px; margin: 6px 0 2px; }
-  input, select, button { font: inherit; }
-  input[type=text], input[type=number], input[type=date], select {
-    width: 100%; padding: 7px 8px; border: 1px solid var(--line); border-radius: 6px; background: #fff; }
-  input[type=range] { width: 100%; }
-  .row { display: flex; gap: 8px; }
-  .row > * { flex: 1; }
-  button { padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: #fff; cursor: pointer; }
-  button.primary { background: var(--ink); color: #fff; border-color: var(--ink); }
-  button:disabled { opacity: .5; cursor: default; }
-  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
-  .chips button { padding: 5px 8px; font-size: 12px; }
-  .chips button.on { background: var(--accent); color: #fff; border-color: var(--accent); }
-  .stat { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 8px; }
-  .stat div { background: var(--bg); border-radius: 6px; padding: 6px 8px; }
-  .stat b { display: block; font-size: 16px; }
-  .stat span { color: var(--muted); font-size: 12px; }
-  .hint { color: var(--muted); font-size: 12px; margin-top: 6px; }
-  #map { height: 100%; }
+  .leaflet-pane.shadow-pane { opacity: .42; }
   #sunpath { width: 100%; height: auto; display: block; }
-  .legend { display: flex; gap: 10px; flex-wrap: wrap; font-size: 12px; color: var(--muted); margin-top: 4px; }
-  .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
-  .leaflet-pane.shadow-pane { opacity: .45; }
-  .print-head { display: none; }
-  @media (max-width: 760px) {
-    .app { grid-template-columns: 1fr; grid-template-rows: 55vh auto; height: auto; }
-    #mapwrap { order: -1; height: 55vh; }
-    aside { border-right: 0; border-top: 1px solid var(--line); }
-  }
-  @media print {
-    @page { size: A3 landscape; margin: 10mm; }
-    .app { grid-template-columns: 300px 1fr; height: 260mm; }
-    .noprint { display: none !important; }
-    .print-head { display: block; }
-    aside { border: 0; }
-  }
+  .print-only { display: none; }
+  @media print { .print-only { display: block; } }
 </style>
 </head>
 <body>
-<div class="app">
-  <aside>
-    <h1>Sun &amp; Shadow Study</h1>
-    <p class="sub">Pick a site, draw your building, see its shadows and the sun path.</p>
+<header class="topbar">
+  <a class="brand" href="../../index.html"><span class="brand-mark"></span>a_tools</a>
+  <span class="crumb">/ <b>Sun &amp; Shadow</b></span>
+  <span class="spacer"></span>
+  <span class="site-pill" id="sitePill" hidden></span>
+</header>
 
-    <section class="noprint">
-      <h2>1. Site</h2>
+<main class="tool">
+  <aside class="panel">
+    <h1>Sun &amp; Shadow</h1>
+    <p class="lead">Draw your building on the map and see its shadows, and its neighbours', for any day and hour.</p>
+
+    <div class="group noprint">
+      <p class="group-title"><span class="step">1</span>Site</p>
       <div class="row">
         <input id="q" type="text" placeholder="Search a place, e.g. Kadıköy, Istanbul">
-        <button id="go" style="flex:0 0 auto">Go</button>
+        <button id="go" class="btn" style="flex:0 0 auto">Go</button>
       </div>
       <p class="hint">Or pan and zoom the map to your plot.</p>
-    </section>
+    </div>
 
-    <section class="noprint">
-      <h2>2. Building footprint</h2>
+    <div class="group noprint">
+      <p class="group-title"><span class="step">2</span>Building</p>
       <div class="row">
-        <button id="draw" class="primary">Draw footprint</button>
-        <button id="clear">Clear</button>
+        <button id="draw" class="btn primary">Draw footprint</button>
+        <button id="clear" class="btn" style="flex:0 0 auto">Clear</button>
       </div>
-      <p class="hint" id="drawHint">Click "Draw footprint", then tap the corners on the map. Tap the first corner (or "Finish") to close.</p>
-      <label for="h">Building height (m)</label>
-      <input id="h" type="number" min="1" max="500" step="0.5" value="15">
-      <label><input id="ctx" type="checkbox" checked> Show neighbouring buildings' shadows (OpenStreetMap)</label>
-      <label for="defH">Default height for neighbours without data (m)</label>
-      <input id="defH" type="number" min="1" max="200" step="0.5" value="9">
+      <p class="hint" id="drawHint">Tap the corners on the map, then tap the first corner (or Finish) to close.</p>
+      <div class="grid-2" style="margin-top:10px">
+        <div class="field"><label for="h">Height <span class="unit">m</span></label>
+          <input id="h" type="number" min="1" max="500" step="0.5" value="15"></div>
+        <div class="field"><label for="defH">Neighbour default <span class="unit">m</span></label>
+          <input id="defH" type="number" min="1" max="200" step="0.5" value="9"></div>
+      </div>
+      <label class="check"><input id="ctx" type="checkbox" checked>Include neighbouring buildings (OpenStreetMap)</label>
       <p class="hint" id="ctxInfo"></p>
-    </section>
+    </div>
 
-    <section>
-      <h2>3. Date &amp; time</h2>
-      <div class="print-head" id="printInfo"></div>
+    <div class="group">
+      <p class="group-title noprint"><span class="step">3</span>Date &amp; time</p>
+      <div class="print-only" id="printInfo"></div>
       <div class="noprint">
         <div class="chips" id="presets">
-          <button data-d="12-21">21 Dec</button>
-          <button data-d="03-20">20 Mar</button>
-          <button data-d="06-21">21 Jun</button>
-          <button data-d="09-22">22 Sep</button>
+          <button class="chip" data-d="12-21">21 Dec</button>
+          <button class="chip" data-d="03-20">20 Mar</button>
+          <button class="chip" data-d="06-21">21 Jun</button>
+          <button class="chip" data-d="09-22">22 Sep</button>
         </div>
-        <div class="row">
-          <div><label for="date">Date</label><input id="date" type="date"></div>
-          <div><label for="tz">UTC offset (h)</label><input id="tz" type="number" step="0.5" min="-12" max="14"></div>
+        <div class="grid-2">
+          <div class="field"><label for="date">Date</label><input id="date" type="date"></div>
+          <div class="field"><label for="tz">UTC offset <span class="unit">h</span></label>
+            <input id="tz" type="number" step="0.5" min="-12" max="14"></div>
         </div>
-        <label for="t">Time: <b id="tLabel"></b></label>
-        <input id="t" type="range" min="0" max="1439" step="5" value="720">
-        <div class="row" style="margin-top:6px">
-          <button id="play">▶ Animate day</button>
-          <button id="multi">9 · 12 · 15 overlay</button>
+        <div class="field"><label for="t">Time <b id="tLabel" style="color:var(--ink)"></b></label>
+          <input id="t" type="range" min="0" max="1439" step="5" value="720"></div>
+        <div class="row" style="margin-bottom:12px">
+          <button id="play" class="btn">▶ Animate day</button>
+          <button id="multi" class="btn">9 · 12 · 15</button>
         </div>
       </div>
-      <div class="stat">
-        <div><b id="alt">–</b><span>Sun altitude</span></div>
-        <div><b id="az">–</b><span>Sun azimuth</span></div>
-        <div><b id="rise">–</b><span>Sunrise</span></div>
-        <div><b id="set">–</b><span>Sunset</span></div>
-        <div><b id="len">–</b><span>Shadow length</span></div>
-        <div><b id="dayl">–</b><span>Daylight</span></div>
+      <div class="stats">
+        <div class="stat"><b id="alt">–</b><span>Sun altitude</span></div>
+        <div class="stat"><b id="az">–</b><span>Sun azimuth</span></div>
+        <div class="stat"><b id="rise">–</b><span>Sunrise</span></div>
+        <div class="stat"><b id="set">–</b><span>Sunset</span></div>
+        <div class="stat"><b id="len">–</b><span>Shadow length</span></div>
+        <div class="stat"><b id="dayl">–</b><span>Daylight</span></div>
       </div>
-    </section>
+    </div>
 
-    <section>
-      <h2>Sun path</h2>
+    <div class="group">
+      <p class="group-title">Sun path</p>
       <svg id="sunpath" viewBox="0 0 300 300" xmlns="http://www.w3.org/2000/svg"></svg>
       <div class="legend">
-        <span><i style="background:#2c7bb6"></i>21 Dec</span>
-        <span><i style="background:#7a9a3a"></i>Equinox</span>
-        <span><i style="background:#d7191c"></i>21 Jun</span>
+        <span><i style="background:#2f5d8a"></i>21 Dec</span>
+        <span><i style="background:#5d8a3c"></i>Equinox</span>
+        <span><i style="background:#c0392b"></i>21 Jun</span>
         <span><i style="background:var(--accent);border-radius:50%"></i>Now</span>
       </div>
-    </section>
+    </div>
 
-    <section class="noprint">
-      <h2>Export</h2>
+    <div class="group noprint">
+      <p class="group-title">Export</p>
       <div class="row">
-        <button id="svg">Sun path (SVG)</button>
-        <button id="print">Sheet (PDF)</button>
+        <button id="svg" class="btn">Sun path · SVG</button>
+        <button id="print" class="btn">Sheet · PDF</button>
       </div>
-      <p class="hint">"Sheet" opens the print dialog; choose "Save as PDF". Neighbour heights come from OpenStreetMap and are often missing, so check them before using results.</p>
-    </section>
+      <p class="note">Neighbour heights come from OpenStreetMap and are often missing. Tap a grey building to set its real height before using results.</p>
+    </div>
   </aside>
-  <div id="mapwrap"><div id="map"></div></div>
-</div>
+  <div class="canvas map"><div id="map" class="fill"></div></div>
+</main>
 
 <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="../../assets/atools.js"></script>
 <script>
 // ---------- Sun position (after SunCalc / Astronomy Answers formulas) ----------
 const Sun = (() => {
@@ -153,7 +122,7 @@ const Sun = (() => {
     const L = M + C + rad * 102.9372 + Math.PI;
     return { dec: Math.asin(Math.sin(e) * Math.sin(L)), ra: Math.atan2(Math.sin(L) * Math.cos(e), Math.cos(L)) };
   }
-  // Returns altitude (rad, above horizon) and azimuth (rad, from north, clockwise).
+  // Altitude (rad, above horizon) and azimuth (rad, from north, clockwise).
   function position(date, lat, lng) {
     const d = toDays(date), phi = rad * lat, c = coords(d);
     const H = rad * (280.16 + 360.9856235 * d) + rad * lng - c.ra;
@@ -167,13 +136,8 @@ const Sun = (() => {
 // ---------- State ----------
 const $ = id => document.getElementById(id);
 const state = { footprint: [], drawing: false, neighbours: [], multi: false, playing: null };
-
-const map = L.map('map', { zoomControl: true }).setView([41.0082, 28.9784], 17);
-L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
-  maxZoom: 21, maxNativeZoom: 20, subdomains: 'abcd',
-  attribution: '&copy; OpenStreetMap contributors &copy; CARTO'
-}).addTo(map);
-L.control.scale({ metric: true, imperial: false }).addTo(map);
+const saved = ATools.getSite();
+const map = ATools.baseMap('map', saved ? [saved.lat, saved.lng] : [41.0082, 28.9784], 17);
 map.createPane('shadow').classList.add('shadow-pane');
 map.getPane('shadow').style.zIndex = 390;
 const shadowLayer = L.layerGroup().addTo(map);
@@ -182,12 +146,8 @@ const plotLayer = L.layerGroup().addTo(map);
 const draftLayer = L.layerGroup().addTo(map);
 
 // ---------- Local metric projection ----------
-function toXY(ll, o) {
-  return [(ll[1] - o[1]) * 111320 * Math.cos(o[0] * Sun.rad), (ll[0] - o[0]) * 110540];
-}
-function toLL(xy, o) {
-  return [o[0] + xy[1] / 110540, o[1] + xy[0] / (111320 * Math.cos(o[0] * Sun.rad))];
-}
+function toXY(ll, o) { return [(ll[1] - o[1]) * 111320 * Math.cos(o[0] * Sun.rad), (ll[0] - o[0]) * 110540]; }
+function toLL(xy, o) { return [o[0] + xy[1] / 110540, o[1] + xy[0] / (111320 * Math.cos(o[0] * Sun.rad))]; }
 function centroid(pts) {
   const n = pts.length; return [pts.reduce((s, p) => s + p[0], 0) / n, pts.reduce((s, p) => s + p[1], 0) / n];
 }
@@ -217,8 +177,9 @@ function currentDate(minutes) {
   return new Date(Date.UTC(y, m - 1, d, 0, 0) + (mins - tz * 60) * 6e4);
 }
 const fmt = m => String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(Math.round(m % 60)).padStart(2, '0');
-const deg = r => (r / Sun.rad);
-const compass = a => ['N','NE','E','SE','S','SW','W','NW'][Math.round(deg(a) / 45) % 8];
+const deg = r => r / Sun.rad;
+const compass = a => ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'][Math.round(deg(a) / 45) % 8];
+const tzLabel = () => 'UTC' + (+$('tz').value >= 0 ? '+' : '') + $('tz').value;
 
 function sunTimes(lat, lng) {
   let rise = null, set = null, prev = null;
@@ -235,23 +196,24 @@ function sunTimes(lat, lng) {
 function render() {
   const [lat, lng] = siteLL();
   const mins = +$('t').value;
-  $('tLabel').textContent = fmt(mins) + ' (UTC' + (($('tz').value >= 0) ? '+' : '') + $('tz').value + ')';
+  $('tLabel').textContent = fmt(mins) + ' · ' + tzLabel();
   const sun = Sun.position(currentDate(), lat, lng);
   const h = parseFloat($('h').value) || 0;
 
-  $('alt').textContent = sun.alt > 0 ? deg(sun.alt).toFixed(1) + '°' : 'below horizon';
+  $('alt').textContent = sun.alt > 0 ? deg(sun.alt).toFixed(1) + '°' : 'Below horizon';
   $('az').textContent = deg(sun.az).toFixed(0) + '° ' + compass(sun.az);
-  $('len').textContent = sun.alt > 0 ? (h / Math.tan(sun.alt)).toFixed(1) + ' m (' + (1 / Math.tan(sun.alt)).toFixed(2) + '×H)' : '–';
+  $('len').textContent = sun.alt > 0 ? (h / Math.tan(sun.alt)).toFixed(1) + ' m' : '–';
   const t = sunTimes(lat, lng);
   $('rise').textContent = t.rise != null ? fmt(t.rise) : '–';
   $('set').textContent = t.set != null ? fmt(t.set) : '–';
   $('dayl').textContent = (t.rise != null && t.set != null) ? fmt(t.set - t.rise) : '–';
-  $('printInfo').innerHTML = `<p><b>${$('date').value}</b>, ${state.multi ? '09:00 · 12:00 · 15:00' : fmt(mins)} (UTC${$('tz').value >= 0 ? '+' : ''}${$('tz').value})<br>` +
+  document.querySelectorAll('#presets .chip').forEach(c => c.classList.toggle('on', $('date').value.endsWith(c.dataset.d)));
+  $('printInfo').innerHTML = `<p><b>${$('date').value}</b>, ${state.multi ? '09:00 · 12:00 · 15:00' : fmt(mins)} (${tzLabel()})<br>` +
     `Site ${lat.toFixed(5)}, ${lng.toFixed(5)} · Building height ${h} m</p>`;
 
   shadowLayer.clearLayers();
   const times = state.multi ? [540, 720, 900] : [mins];
-  const colors = state.multi ? ['#3b5b9a', '#2c3e66', '#5a3d7a'] : ['#2c3e66'];
+  const colors = state.multi ? ['#4a6fa5', '#26344f', '#6b4a8a'] : ['#26344f'];
   const o = [lat, lng];
   times.forEach((tm, i) => {
     const s = Sun.position(currentDate(tm), lat, lng);
@@ -267,32 +229,32 @@ function drawSunPath(lat, lng, now) {
   const svg = $('sunpath'), cx = 150, cy = 150, R = 120;
   const pt = s => { const r = R * (1 - deg(s.alt) / 90); return [cx + r * Math.sin(s.az), cy - r * Math.cos(s.az)]; };
   let out = `<rect width="300" height="300" fill="#fff"/>`;
-  for (const a of [0, 30, 60]) out += `<circle cx="${cx}" cy="${cy}" r="${R * (1 - a / 90)}" fill="none" stroke="#ddd"/>` +
-    `<text x="${cx + 3}" y="${cy - R * (1 - a / 90) + 11}" font-size="9" fill="#999">${a}°</text>`;
+  for (const a of [0, 30, 60]) out += `<circle cx="${cx}" cy="${cy}" r="${R * (1 - a / 90)}" fill="none" stroke="#e3e0d8"/>` +
+    `<text x="${cx + 3}" y="${cy - R * (1 - a / 90) + 11}" font-size="9" fill="#8a8882">${a}°</text>`;
   for (let a = 0; a < 360; a += 30) {
     const r = Sun.rad * a;
-    out += `<line x1="${cx}" y1="${cy}" x2="${cx + R * Math.sin(r)}" y2="${cy - R * Math.cos(r)}" stroke="#eee"/>`;
+    out += `<line x1="${cx}" y1="${cy}" x2="${cx + R * Math.sin(r)}" y2="${cy - R * Math.cos(r)}" stroke="#f0eee8"/>`;
   }
   [['N', 0], ['E', 90], ['S', 180], ['W', 270]].forEach(([t, a]) => {
     const r = Sun.rad * a;
-    out += `<text x="${cx + (R + 14) * Math.sin(r)}" y="${cy - (R + 14) * Math.cos(r) + 4}" font-size="12" font-weight="600" text-anchor="middle" fill="#555">${t}</text>`;
+    out += `<text x="${cx + (R + 14) * Math.sin(r)}" y="${cy - (R + 14) * Math.cos(r) + 4}" font-size="12" font-weight="600" text-anchor="middle" fill="#4a4945">${t}</text>`;
   });
-  const y = $('date').value.slice(0, 4);
-  [[`${y}-12-21`, '#2c7bb6'], [`${y}-03-20`, '#7a9a3a'], [`${y}-06-21`, '#d7191c']].forEach(([d, c]) => {
-    const [Y, M, D] = d.split('-').map(Number), tz = parseFloat($('tz').value) || 0;
-    let path = '', labels = '';
+  const y = $('date').value.slice(0, 4), tz = parseFloat($('tz').value) || 0;
+  [[`${y}-12-21`, '#2f5d8a'], [`${y}-03-20`, '#5d8a3c'], [`${y}-06-21`, '#c0392b']].forEach(([d, c]) => {
+    const [Y, M, D] = d.split('-').map(Number);
+    let path = '', marks = '';
     for (let m = 0; m <= 1440; m += 10) {
       const s = Sun.position(new Date(Date.UTC(Y, M - 1, D) + (m - tz * 60) * 6e4), lat, lng);
       if (s.alt < 0) continue;
       const [x, yy] = pt(s);
       path += (path ? 'L' : 'M') + x.toFixed(1) + ' ' + yy.toFixed(1);
-      if (m % 60 === 0) labels += `<circle cx="${x}" cy="${yy}" r="1.8" fill="${c}"/>` +
-        (c === '#d7191c' && m % 120 === 0 ? `<text x="${x}" y="${yy - 4}" font-size="8" text-anchor="middle" fill="${c}">${m / 60}</text>` : '');
+      if (m % 60 === 0) marks += `<circle cx="${x}" cy="${yy}" r="1.8" fill="${c}"/>` +
+        (c === '#c0392b' && m % 120 === 0 ? `<text x="${x}" y="${yy - 4}" font-size="8" text-anchor="middle" fill="${c}">${m / 60}</text>` : '');
     }
-    out += `<path d="${path}" fill="none" stroke="${c}" stroke-width="1.6"/>` + labels;
+    out += `<path d="${path}" fill="none" stroke="${c}" stroke-width="1.6"/>` + marks;
   });
-  if (now.alt > 0) { const [x, yy] = pt(now); out += `<circle cx="${x}" cy="${yy}" r="6" fill="#d9822b" stroke="#fff" stroke-width="2"/>`; }
-  out += `<text x="6" y="294" font-size="9" fill="#999">${lat.toFixed(3)}, ${lng.toFixed(3)}</text>`;
+  if (now.alt > 0) { const [x, yy] = pt(now); out += `<circle cx="${x}" cy="${yy}" r="6" fill="#c8553d" stroke="#fff" stroke-width="2"/>`; }
+  out += `<text x="6" y="294" font-size="9" fill="#8a8882">${lat.toFixed(3)}, ${lng.toFixed(3)}</text>`;
   svg.innerHTML = out;
 }
 
@@ -300,13 +262,15 @@ function drawSunPath(lat, lng, now) {
 function drawPlot() {
   plotLayer.clearLayers();
   if (state.footprint.length >= 3)
-    L.polygon(state.footprint, { color: '#c0392b', weight: 2, fillColor: '#c0392b', fillOpacity: .35 }).addTo(plotLayer);
+    L.polygon(state.footprint, { color: '#c8553d', weight: 2, fillColor: '#c8553d', fillOpacity: .35 }).addTo(plotLayer);
 }
 function finishDraw() {
   state.drawing = false; draftLayer.clearLayers();
   $('draw').textContent = 'Redraw footprint';
   map.getContainer().style.cursor = '';
   if (state.footprint.length < 3) { state.footprint = []; return; }
+  const [lat, lng] = centroid(state.footprint);
+  ATools.setSite({ ...(ATools.getSite() || {}), lat, lng });
   drawPlot(); autoTz(); loadNeighbours(); render();
 }
 $('draw').onclick = () => {
@@ -329,8 +293,8 @@ map.on('click', e => {
   }
   state.footprint.push(p);
   draftLayer.clearLayers();
-  L.polyline(state.footprint, { color: '#c0392b', dashArray: '4 4' }).addTo(draftLayer);
-  state.footprint.forEach((q, i) => L.circleMarker(q, { radius: i ? 4 : 6, color: '#c0392b', fillOpacity: 1 }).addTo(draftLayer));
+  L.polyline(state.footprint, { color: '#c8553d', dashArray: '4 4' }).addTo(draftLayer);
+  state.footprint.forEach((q, i) => L.circleMarker(q, { radius: i ? 4 : 6, color: '#c8553d', fillOpacity: 1 }).addTo(draftLayer));
 });
 
 // ---------- Neighbours from OpenStreetMap (Overpass) ----------
@@ -344,7 +308,7 @@ function osmHeight(tags) {
 async function loadNeighbours() {
   if (!$('ctx').checked) return;
   const [lat, lng] = siteLL();
-  $('ctxInfo').textContent = 'Loading neighbours…';
+  $('ctxInfo').innerHTML = '<span class="spinner"></span>Loading neighbours…';
   const q = `[out:json][timeout:20];way["building"](around:200,${lat},${lng});out geom;`;
   try {
     const r = await fetch('https://overpass-api.de/api/interpreter', { method: 'POST', body: 'data=' + encodeURIComponent(q) });
@@ -355,22 +319,22 @@ async function loadNeighbours() {
     state.neighbours = j.elements.filter(w => w.geometry && w.geometry.length > 3).map(w => {
       const poly = w.geometry.map(g => [g.lat, g.lon]); poly.pop();
       const hh = osmHeight(w.tags || {}); if (hh.known) known++;
-      return { poly, h: hh.h, known: hh.known, tags: w.tags || {} };
+      return { poly, h: hh.h, known: hh.known };
     }).filter(b => {  // drop the OSM building that sits where the user drew theirs
       if (!fpC) return true;
-      const c = centroid(b.poly), d = toXY(c, fpC);
+      const d = toXY(centroid(b.poly), fpC);
       return Math.hypot(d[0], d[1]) > 6;
     });
     state.neighbours.forEach(b => {
-      const poly = L.polygon(b.poly, { color: b.known ? '#555' : '#999', weight: 1, fillColor: '#bbb', fillOpacity: .5 })
+      const poly = L.polygon(b.poly, { color: b.known ? '#4a4945' : '#a09d95', weight: 1, fillColor: '#c9c6bd', fillOpacity: .55 })
         .bindTooltip(() => `${b.h.toFixed(1)} m${b.known ? '' : ' (assumed)'} · tap to edit`).addTo(neighbourLayer);
       poly.on('click', () => {
         if (state.drawing) return;
         const v = prompt('Height of this building (m)', b.h.toFixed(1));
-        if (v !== null && !isNaN(parseFloat(v))) { b.h = parseFloat(v); b.known = true; poly.setStyle({ color: '#555' }); render(); }
+        if (v !== null && !isNaN(parseFloat(v))) { b.h = parseFloat(v); b.known = true; poly.setStyle({ color: '#4a4945' }); render(); }
       });
     });
-    $('ctxInfo').textContent = `${state.neighbours.length} neighbouring buildings within 200 m; ${known} have height data. Tap a building to set its height.`;
+    $('ctxInfo').textContent = `${state.neighbours.length} buildings within 200 m, ${known} with height data. Tap one to set its height.`;
   } catch (err) {
     $('ctxInfo').textContent = 'Could not load neighbours from OpenStreetMap.';
   }
@@ -379,7 +343,7 @@ async function loadNeighbours() {
 
 // ---------- Controls ----------
 function autoTz() {
-  const lng = siteLL()[1], lat = siteLL()[0];
+  const [lat, lng] = siteLL();
   // Turkey uses UTC+3 all year; elsewhere start from the longitude estimate (editable).
   const inTurkey = lat > 35.8 && lat < 42.2 && lng > 25.6 && lng < 44.9;
   $('tz').value = inTurkey ? 3 : Math.round(lng / 15);
@@ -387,17 +351,16 @@ function autoTz() {
 $('go').onclick = async () => {
   const q = $('q').value.trim(); if (!q) return;
   try {
-    const r = await fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&q=' + encodeURIComponent(q));
-    const j = await r.json();
-    if (j[0]) { map.setView([+j[0].lat, +j[0].lon], 18); autoTz(); render(); }
-    else alert('Place not found.');
+    const s = await ATools.geocode(q);
+    if (!s) return alert('Place not found.');
+    map.setView([s.lat, s.lng], 18); ATools.setSite(s); autoTz(); render();
   } catch { alert('Search failed. Pan the map instead.'); }
 };
 $('q').addEventListener('keydown', e => { if (e.key === 'Enter') $('go').click(); });
-document.querySelectorAll('#presets button').forEach(b => b.onclick = () => {
+document.querySelectorAll('#presets .chip').forEach(b => b.onclick = () => {
   $('date').value = $('date').value.slice(0, 4) + '-' + b.dataset.d; render();
 });
-['t', 'h', 'date', 'tz', 'ctx'].forEach(id => $(id).addEventListener('input', render));
+['t', 'h', 'date', 'tz'].forEach(id => $(id).addEventListener('input', render));
 $('ctx').addEventListener('change', () => { if ($('ctx').checked && !state.neighbours.length) loadNeighbours(); else render(); });
 $('defH').addEventListener('change', () => { state.neighbours.forEach(b => { if (!b.known) b.h = parseFloat($('defH').value) || 9; }); render(); });
 $('multi').onclick = () => { state.multi = !state.multi; $('multi').classList.toggle('primary', state.multi); render(); };
@@ -412,19 +375,13 @@ $('play').onclick = () => {
   }, 120);
 };
 map.on('moveend', () => { if (!state.footprint.length) render(); });
-$('svg').onclick = () => {
-  const blob = new Blob(['<?xml version="1.0"?>\n' + $('sunpath').outerHTML], { type: 'image/svg+xml' });
-  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'sun-path.svg'; a.click();
-};
+$('svg').onclick = () => ATools.downloadSvg($('sunpath'), 'sun-path.svg');
 $('print').onclick = () => window.print();
 
 // ---------- Init ----------
-(function init() {
-  const now = new Date();
-  $('date').value = now.getFullYear() + '-12-21';
-  autoTz();
-  render();
-})();
+$('date').value = new Date().getFullYear() + '-12-21';
+autoTz();
+render();
 </script>
 </body>
 </html>
