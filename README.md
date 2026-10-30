@@ -58,4 +58,4 @@ All tools share `assets/atools.css` and `assets/atools.js`. Calculations used by
 
 Each tool is a single static HTML file with no build step. Open it in a browser or serve the repo with any static host.
 
-Data: map tiles © OpenStreetMap contributors © CARTO; buildings via the Overpass API; place search via Nominatim. Neighbour heights come from OSM `height` / `building:levels` tags and are often missing, so the tool falls back to an editable default.
+Data: map tiles © OpenStreetMap contributors (openstreetmap.org standard tiles, greyed in CSS); buildings via the Overpass API; place search via Nominatim. Neighbour heights come from OSM `height` / `building:levels` tags and are often missing, so the tool falls back to an editable default.

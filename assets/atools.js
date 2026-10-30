@@ -40,9 +40,10 @@
   // Standard light basemap for all map tools.
   function baseMap(id, center, zoom) {
     const map = L.map(id).setView(center, zoom);
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
-      maxZoom: 21, maxNativeZoom: 20, subdomains: 'abcd',
-      attribution: '&copy; OpenStreetMap contributors &copy; CARTO'
+    // OpenStreetMap standard tiles (no key needed), greyed in CSS for a calm base.
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 21, maxNativeZoom: 19, className: 'atools-tiles',
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
     }).addTo(map);
     L.control.scale({ metric: true, imperial: false }).addTo(map);
     return map;

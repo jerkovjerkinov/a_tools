@@ -131,6 +131,7 @@ ul.notes li::before { content: attr(data-i); display: grid; place-items: center;
 /* Leaflet polish */
 .leaflet-container { font: 12px var(--font); background: #eceae4; }
 .leaflet-bar a { color: var(--ink); }
+.atools-tiles { filter: grayscale(1) brightness(1.06) contrast(.88); }
 
 /* ---------- Responsive ---------- */
 @media (max-width: 820px) {
