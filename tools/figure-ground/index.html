@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Figure-Ground · a_tools</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="../../assets/atools.css">
+<style>
+  #pick { height: 220px; border-radius: var(--radius-sm); border: 1px solid var(--line); overflow: hidden; margin-top: 8px; }
+  .drawing { padding: 22px; display: grid; place-items: center; min-height: 100%; }
+  .drawing .card { width: min(100%, 900px); }
+  #fg { width: 100%; height: auto; display: block; border-radius: 6px; }
+</style>
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="../../index.html"><span class="brand-mark"></span>a_tools</a>
+  <span class="crumb">/ <b>Figure-Ground</b></span>
+  <span class="spacer"></span>
+  <span class="site-pill" id="sitePill" hidden></span>
+</header>
+
+<main class="tool">
+  <aside class="panel">
+    <h1>Figure-Ground</h1>
+    <p class="lead">The urban fabric around your site in black and white, drawn from OpenStreetMap and ready for your boards.</p>
+
+    <div class="group noprint">
+      <p class="group-title"><span class="step">1</span>Site</p>
+      <div class="row">
+        <input id="q" type="text" placeholder="Search a place">
+        <button id="go" class="btn" style="flex:0 0 auto">Go</button>
+      </div>
+      <div id="pick"></div>
+      <p class="hint" id="where">Tap the map to set the centre of the drawing.</p>
+    </div>
+
+    <div class="group">
+      <p class="group-title"><span class="step">2</span>Drawing</p>
+      <div class="field"><span class="label">Area</span>
+        <div class="seg" id="radius">
+          <button data-r="250">500 m</button><button data-r="500" class="on">1 km</button><button data-r="1000">2 km</button>
+        </div>
+      </div>
+      <div class="field"><span class="label">Style</span>
+        <div class="seg" id="style">
+          <button data-s="figure" class="on">Figure-ground</button><button data-s="inverse">Inverse</button><button data-s="context">Context</button>
+        </div>
+      </div>
+      <label class="check"><input id="oRoads" type="checkbox">Road centrelines</label>
+      <label class="check"><input id="oWater" type="checkbox" checked>Water</label>
+      <label class="check"><input id="oGreen" type="checkbox">Parks and green areas</label>
+      <label class="check"><input id="oSite" type="checkbox" checked>Mark the site</label>
+      <button id="load" class="btn primary block noprint">Draw figure-ground</button>
+      <p class="hint" id="status"></p>
+    </div>
+
+    <div class="group">
+      <p class="group-title">Fabric</p>
+      <div class="stats">
+        <div class="stat"><b id="sB">–</b><span>Buildings</span></div>
+        <div class="stat"><b id="sCov">–</b><span>Built coverage</span></div>
+        <div class="stat"><b id="sAvg">–</b><span>Median footprint</span></div>
+        <div class="stat"><b id="sGrain">–</b><span>Grain</span></div>
+      </div>
+    </div>
+
+    <div class="group noprint">
+      <div class="row">
+        <button id="svg" class="btn" disabled>SVG</button>
+        <button id="png" class="btn" disabled>PNG</button>
+        <button id="print" class="btn">PDF</button>
+      </div>
+      <p class="hint">SVG opens in Illustrator, Inkscape or Figma with buildings, roads and water on separate groups.</p>
+    </div>
+  </aside>
+
+  <section class="canvas">
+    <div class="drawing">
+      <div class="card">
+        <svg id="fg" viewBox="0 0 1000 1000"><rect width="1000" height="1000" fill="#fff"/>
+          <text x="500" y="490" text-anchor="middle" font-size="22" font-family="Inter, sans-serif" fill="#1b1b19" font-weight="600">Pick a site and press "Draw figure-ground"</text>
+          <text x="500" y="525" text-anchor="middle" font-size="16" font-family="Inter, sans-serif" fill="#8a8882">Buildings come from OpenStreetMap</text></svg>
+      </div>
+    </div>
+  </section>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="../../assets/atools.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+const rad = Math.PI / 180;
+let site = ATools.getSite() || { lat: 41.0082, lng: 28.9784, name: 'Istanbul' };
+let R = 500, style = 'figure', geo = null;
+
+// ---------- Location picker ----------
+const pick = ATools.baseMap('pick', [site.lat, site.lng], 15);
+const marker = L.circleMarker([site.lat, site.lng], { radius: 7, color: '#fff', weight: 2, fillColor: '#c8553d', fillOpacity: 1 }).addTo(pick);
+const ring = L.rectangle([[0, 0], [0, 0]], { color: '#1b1b19', weight: 1, fill: false, dashArray: '4 4' }).addTo(pick);
+function setSite(s, save = true) {
+  site = s; marker.setLatLng([s.lat, s.lng]); drawRing();
+  $('where').textContent = (s.name ? s.name + ' · ' : '') + s.lat.toFixed(4) + ', ' + s.lng.toFixed(4);
+  if (save) ATools.setSite(s);
+}
+function drawRing() {
+  const dLat = R / 110540, dLng = R / (111320 * Math.cos(site.lat * rad));
+  ring.setBounds([[site.lat - dLat, site.lng - dLng], [site.lat + dLat, site.lng + dLng]]);
+}
+setSite(site, false);
+pick.fitBounds(ring.getBounds(), { padding: [10, 10] });
+pick.on('click', e => setSite({ lat: e.latlng.lat, lng: e.latlng.lng }));
+$('go').onclick = async () => {
+  const q = $('q').value.trim(); if (!q) return;
+  try { const s = await ATools.geocode(q); if (!s) return alert('Place not found.'); setSite(s); pick.fitBounds(ring.getBounds()); }
+  catch { alert('Search failed. Tap the map instead.'); }
+};
+$('q').addEventListener('keydown', e => { if (e.key === 'Enter') $('go').click(); });
+function seg(id, fn) {
+  document.querySelectorAll(`#${id} button`).forEach(b => b.onclick = () => {
+    document.querySelectorAll(`#${id} button`).forEach(x => x.classList.toggle('on', x === b)); fn(b);
+  });
+}
+seg('radius', b => { R = +b.dataset.r; drawRing(); pick.fitBounds(ring.getBounds()); });
+seg('style', b => { style = b.dataset.s; if (geo) render(); });
+['oRoads', 'oWater', 'oGreen', 'oSite'].forEach(id => $(id).addEventListener('change', () => geo && render()));
+
+// ---------- Data ----------
+async function load() {
+  $('status').innerHTML = '<span class="spinner"></span>Loading buildings…';
+  $('load').disabled = true;
+  const dLat = R / 110540, dLng = R / (111320 * Math.cos(site.lat * rad));
+  const bb = [site.lat - dLat, site.lng - dLng, site.lat + dLat, site.lng + dLng].map(x => x.toFixed(6)).join(',');
+  const q = `[out:json][timeout:60][bbox:${bb}];
+    (way["building"];relation["building"]["type"="multipolygon"];)->.b; .b out geom;
+    way["highway"]["highway"!~"^(proposed|construction|platform|corridor|elevator|steps)$"]; out geom;
+    (way["natural"="water"];relation["natural"="water"];way["waterway"="riverbank"];way["natural"="coastline"];)->.w; .w out geom;
+    (way["leisure"~"^(park|garden|playground|pitch)$"];way["landuse"~"^(grass|forest|recreation_ground|cemetery|meadow)$"];relation["leisure"="park"];)->.g; .g out geom;`;
+  try {
+    const r = await fetch('https://overpass-api.de/api/interpreter', { method: 'POST', body: 'data=' + encodeURIComponent(q) });
+    if (!r.ok) throw new Error(r.status);
+    geo = parse(await r.json());
+    $('status').textContent = `${geo.buildings.length.toLocaleString('en-US')} buildings loaded.`;
+    render();
+  } catch (e) {
+    $('status').textContent = 'Could not load OpenStreetMap data. The server may be busy; try again in a minute or pick a smaller area.';
+  }
+  $('load').disabled = false;
+}
+
+// Local metres around the site; y up.
+function xy(lat, lng) { return [(lng - site.lng) * 111320 * Math.cos(site.lat * rad), (lat - site.lat) * 110540]; }
+function rings(el) {
+  if (el.type === 'way') return el.geometry ? [el.geometry.map(g => xy(g.lat, g.lon))] : [];
+  return (el.members || []).filter(m => m.geometry).map(m => m.geometry.map(g => xy(g.lat, g.lon)));
+}
+function area(ring) { let a = 0; for (let i = 0; i < ring.length; i++) { const p = ring[i], q = ring[(i + 1) % ring.length]; a += p[0] * q[1] - q[0] * p[1]; } return Math.abs(a / 2); }
+function parse(j) {
+  const out = { buildings: [], roads: [], water: [], coast: [], green: [] };
+  j.elements.forEach(el => {
+    const t = el.tags || {};
+    if (t.building) out.buildings.push(rings(el));
+    else if (t.highway) out.roads.push({ line: rings(el)[0], kind: t.highway });
+    else if (t.natural === 'coastline') out.coast.push(rings(el)[0]);
+    else if (t.natural === 'water' || t.waterway) out.water.push(rings(el));
+    else out.green.push(rings(el));
+  });
+  return out;
+}
+
+// ---------- Render ----------
+const ROAD_W = { motorway: 7, trunk: 6, primary: 5, secondary: 4, tertiary: 3.2, residential: 2.4, unclassified: 2.4, service: 1.4,
+                 living_street: 2, pedestrian: 2, footway: .9, path: .9, cycleway: .9, track: 1 };
+function render() {
+  const S = 1000 / (2 * R);
+  const P = ([x, y]) => ((x + R) * S).toFixed(1) + ',' + ((R - y) * S).toFixed(1);
+  const path = rs => rs.filter(r => r && r.length > 2).map(r => 'M' + r.map(P).join('L') + 'Z').join('');
+  const line = r => r && r.length > 1 ? 'M' + r.map(P).join('L') : '';
+  const inv = style === 'inverse';
+  const bg = inv ? '#111' : '#fff', fig = inv ? '#fff' : '#111';
+  const ctx = style === 'context';
+  let s = `<defs><clipPath id="clip"><rect width="1000" height="1000"/></clipPath></defs><rect width="1000" height="1000" fill="${bg}"/><g clip-path="url(#clip)">`;
+  if ($('oGreen').checked) s += `<g id="green" fill="${inv ? '#2d3a26' : '#dfe8d6'}">${geo.green.map(g => `<path d="${path(g)}" fill-rule="evenodd"/>`).join('')}</g>`;
+  if ($('oWater').checked) s += `<g id="water" fill="${inv ? '#1d2c3a' : '#d6e3ee'}">${geo.water.map(g => `<path d="${path(g)}" fill-rule="evenodd"/>`).join('')}</g>` +
+    `<g id="coast" fill="none" stroke="${inv ? '#4a6a8a' : '#8fb0cc'}" stroke-width="1.2">${geo.coast.map(c => `<path d="${line(c)}"/>`).join('')}</g>`;
+  if ($('oRoads').checked) s += `<g id="roads" fill="none" stroke="${inv ? '#555' : '#c9c6bd'}" stroke-linecap="round" stroke-linejoin="round">` +
+    geo.roads.map(r => `<path d="${line(r.line)}" stroke-width="${((ROAD_W[r.kind] || 1.2) * (500 / R)).toFixed(2)}"/>`).join('') + '</g>';
+  s += `<g id="buildings" fill="${ctx ? '#b8b4aa' : fig}">${geo.buildings.map(b => `<path d="${path(b)}" fill-rule="evenodd"/>`).join('')}</g>`;
+  if ($('oSite').checked) s += `<g id="site"><circle cx="500" cy="500" r="${Math.max(10, 40 * 500 / R)}" fill="none" stroke="#c8553d" stroke-width="3"/><circle cx="500" cy="500" r="4" fill="#c8553d"/></g>`;
+  s += '</g>';
+  // scale bar + north arrow
+  const bar = R >= 1000 ? 500 : R >= 500 ? 200 : 100, bw = bar * S, ink = inv ? '#fff' : '#111';
+  s += `<g font-family="Inter, sans-serif" fill="${ink}"><rect x="30" y="952" width="${bw}" height="6" fill="${ink}"/><rect x="${30 + bw / 2}" y="952" width="${bw / 2}" height="6" fill="${bg}" stroke="${ink}" stroke-width="1"/>` +
+       `<text x="30" y="944" font-size="14">0</text><text x="${30 + bw}" y="944" font-size="14" text-anchor="end">${bar} m</text>` +
+       `<path d="M960 30 L972 66 L960 58 L948 66 Z" fill="${ink}"/><text x="960" y="86" font-size="14" text-anchor="middle" font-weight="600">N</text></g>`;
+  $('fg').innerHTML = s;
+  $('svg').disabled = $('png').disabled = false;
+  stats();
+}
+
+function stats() {
+  const areas = geo.buildings.map(b => b.reduce((a, r, i) => a + (i === 0 ? area(r) : -area(r)), 0)).filter(a => a > 4).sort((a, b) => a - b);
+  const total = areas.reduce((a, b) => a + b, 0), med = areas[Math.floor(areas.length / 2)] || 0;
+  $('sB').textContent = areas.length.toLocaleString('en-US');
+  $('sCov').textContent = Math.round(100 * total / (4 * R * R)) + '%';
+  $('sAvg').textContent = Math.round(med) + ' m²';
+  $('sGrain').textContent = !med ? '–' : med < 150 ? 'Fine' : med < 600 ? 'Medium' : 'Coarse';
+}
+
+$('load').onclick = load;
+$('svg').onclick = () => ATools.downloadSvg($('fg'), 'figure-ground.svg');
+$('png').onclick = () => {
+  const s = $('fg').cloneNode(true); s.setAttribute('xmlns', 'http://www.w3.org/2000/svg'); s.setAttribute('width', 3000); s.setAttribute('height', 3000);
+  const img = new Image(), c = document.createElement('canvas'); c.width = c.height = 3000;
+  img.onload = () => {
+    c.getContext('2d').drawImage(img, 0, 0);
+    c.toBlob(b => { const a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = 'figure-ground.png'; a.click(); });
+  };
+  img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(s.outerHTML);
+};
+$('print').onclick = () => window.print();
+</script>
+</body>
+</html>

@@ -38,6 +38,7 @@ h1, h2, h3 { letter-spacing: -0.01em; }
 .site-pill { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink-2);
   background: var(--surface-2); border-radius: 999px; padding: 4px 10px; max-width: 46vw;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.site-pill[hidden] { display: none; }
 .site-pill::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); flex: none; }
 
 /* ---------- Tool layout: panel + canvas ---------- */

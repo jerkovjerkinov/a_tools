@@ -10,6 +10,8 @@ Free, browser-based design tools for architects and architecture students.
 | Sun & Shadow Study | Prototype | [`tools/sun-shadow/`](tools/sun-shadow/index.html) |
 | Site Climate | Prototype | [`tools/climate/`](tools/climate/index.html) |
 | Zoning Envelope | Prototype | [`tools/zoning/`](tools/zoning/index.html) |
+| Figure-Ground | Prototype | [`tools/figure-ground/`](tools/figure-ground/index.html) |
+| Walkability | Prototype | [`tools/walkability/`](tools/walkability/index.html) |
 
 ### Sun & Shadow Study
 
@@ -28,6 +30,14 @@ One year of hourly ERA5 weather (Open-Meteo) for the site: monthly temperature b
 ### Zoning Envelope
 
 Plot size, setbacks, site coverage, FAR, height limit and floor heights in; buildable footprint, floors, floor area, governing rule, plan and massing SVG out. Türkiye mode uses TAKS / KAKS (emsal) / Hmax terms. Pre-check only.
+
+### Figure-Ground
+
+Buildings, roads, water and green areas from OpenStreetMap (Overpass) around the site at 500 m, 1 km or 2 km, drawn as figure-ground, inverse or context. Built coverage, median footprint and grain. SVG (layered) and 3000 px PNG export.
+
+### Walkability
+
+The OSM footpath and street network within a 15-minute walk, coloured by 5 / 10 / 15 minute bands (in-browser Dijkstra), with daily-need places (food, grocery, schools, health, transit, parks) counted per band and a 15-minute neighbourhood score.
 
 All tools share `assets/atools.css` and `assets/atools.js`; the site set on the hub (or in any tool) is stored in the browser and reused by the others.
 
