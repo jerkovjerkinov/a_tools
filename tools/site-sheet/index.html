@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Site Analysis Sheet · a_tools</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="../../assets/atools.css">
+<style>
+  #pick { height: 200px; border-radius: var(--radius-sm); border: 1px solid var(--line); overflow: hidden; margin-top: 8px; }
+  .canvas { padding: 22px; }
+  /* The board keeps A3 landscape proportions on screen and fills the page in print. */
+  .board { background: #fff; border: 1px solid var(--line); border-radius: var(--radius); aspect-ratio: 420 / 297;
+    width: 100%; max-width: 1500px; margin: 0 auto; padding: 1.6%; display: grid; gap: 1.2%;
+    grid-template-columns: 1.55fr 1fr 1fr 1.05fr; grid-template-rows: auto minmax(0, 1.25fr) minmax(0, .8fr);
+    grid-template-areas: "head head head head" "fg sun wind notes" "fg temp comf notes"; }
+  .board > div { min-width: 0; min-height: 0; }
+  .b-head { grid-area: head; display: flex; align-items: flex-end; gap: 24px; border-bottom: 2px solid var(--ink); padding-bottom: 10px; }
+  .b-head h2 { margin: 0; font-size: 24px; line-height: 1.1; letter-spacing: -0.02em; }
+  .b-head .meta { color: var(--ink-2); font-size: 12px; margin-top: 3px; }
+  .b-head .grow { flex: 1; min-width: 0; }
+  .b-keys { display: grid; grid-template-columns: repeat(6, auto); gap: 4px 18px; }
+  .b-keys div { font-size: 10.5px; color: var(--muted); white-space: nowrap; }
+  .b-keys b { display: block; font-size: 15px; color: var(--ink); font-variant-numeric: tabular-nums; }
+  .b-fg { grid-area: fg; display: flex; flex-direction: column; }
+  .b-fg svg { width: 100%; height: auto; aspect-ratio: 1; display: block; border: 1px solid var(--line); }
+  .b-sun { grid-area: sun; } .b-wind { grid-area: wind; } .b-temp { grid-area: temp; } .b-comf { grid-area: comf; }
+  .b-notes { grid-area: notes; overflow: hidden; }
+  .b-cell { display: flex; flex-direction: column; }
+  .b-cell h3, .b-notes h3, .b-fg h3 { margin: 0 0 1px; font-size: 12.5px; font-weight: 650; }
+  .b-cell .sub, .b-notes .sub, .b-fg .sub { margin: 0 0 6px; font-size: 10.5px; color: var(--muted); }
+  .b-cell .fig { flex: 1; min-height: 0; display: grid; place-items: center; }
+  .b-cell .fig svg { max-width: 100%; max-height: 100%; width: auto; height: 100%; display: block; }
+  .b-cell .legend, .b-fg .legend { font-size: 10px; gap: 8px; margin-top: 4px; }
+  .b-notes ul.notes { gap: 6px; }
+  .b-notes ul.notes li { font-size: 11px; line-height: 1.35; grid-template-columns: 18px 1fr; }
+  .b-notes ul.notes li::before { width: 16px; height: 16px; font-size: 9.5px; }
+  .b-foot { font-size: 9.5px; color: var(--muted); margin-top: 8px; }
+  .wait { display: grid; place-items: center; height: 100%; min-height: 80px; color: var(--muted); font-size: 12px; text-align: center; }
+  @media (max-width: 1100px) {
+    .board { aspect-ratio: auto; grid-template-columns: 1fr 1fr; grid-template-rows: none;
+      grid-template-areas: "head head" "fg fg" "sun wind" "temp comf" "notes notes"; padding: 16px; gap: 18px; }
+    .b-head { flex-direction: column; align-items: flex-start; gap: 10px; }
+    .b-keys { grid-template-columns: repeat(3, auto); }
+    .b-cell .fig svg { width: 100%; height: auto; }
+  }
+  @media (max-width: 820px) {
+    .canvas { padding: 12px; }
+    .board { grid-template-columns: 1fr; grid-template-areas: "head" "fg" "sun" "wind" "temp" "comf" "notes"; }
+  }
+  @media print {
+    @page { size: A3 landscape; margin: 8mm; }
+    .topbar, .panel { display: none !important; }
+    .tool { display: block; height: auto; }
+    .canvas { padding: 0; overflow: visible; }
+    .board { border: 0; border-radius: 0; max-width: none; width: 404mm; height: 281mm; aspect-ratio: auto; padding: 0;
+      grid-template-columns: 1.55fr 1fr 1fr 1.05fr; grid-template-rows: auto minmax(0, 1.25fr) minmax(0, .8fr);
+      grid-template-areas: "head head head head" "fg sun wind notes" "fg temp comf notes"; gap: 5mm; }
+    .b-head { flex-direction: row; align-items: flex-end; }
+    .b-keys { grid-template-columns: repeat(6, auto); }
+    .b-cell .fig svg { width: auto; height: 100%; }
+  }
+</style>
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="../../index.html"><span class="brand-mark"></span>a_tools</a>
+  <span class="crumb">/ <b>Site Analysis Sheet</b></span>
+  <span class="spacer"></span>
+  <span class="site-pill" id="sitePill" hidden></span>
+</header>
+
+<main class="tool">
+  <aside class="panel">
+    <h1>Site Analysis Sheet</h1>
+    <p class="lead">One A3 board with the figure-ground, sun path, wind rose, climate charts and design notes for your site.</p>
+
+    <div class="group">
+      <p class="group-title"><span class="step">1</span>Location</p>
+      <div class="row">
+        <input id="q" type="text" placeholder="Search a place">
+        <button id="go" class="btn" style="flex:0 0 auto">Go</button>
+      </div>
+      <div id="pick"></div>
+      <p class="hint" id="where">Tap the map to place the site.</p>
+    </div>
+
+    <div class="group">
+      <p class="group-title"><span class="step">2</span>Sheet</p>
+      <div class="field"><label for="title">Title</label><input id="title" type="text" placeholder="Site analysis"></div>
+      <div class="field"><label for="author">Name or studio <span class="unit">optional</span></label><input id="author" type="text"></div>
+      <div class="field"><span class="label">Figure-ground area</span>
+        <div class="seg" id="radius"><button data-r="250">500 m</button><button data-r="500" class="on">1 km</button></div>
+      </div>
+      <div class="field"><label for="year">Weather year</label><select id="year"></select></div>
+      <button id="make" class="btn primary block">Make sheet</button>
+      <p class="hint" id="status"></p>
+    </div>
+
+    <div class="group">
+      <button id="print" class="btn block" disabled>Print or save as PDF (A3)</button>
+      <p class="hint">In the print dialog choose A3 landscape and turn off headers and footers.</p>
+      <p class="hint">Data: OpenStreetMap contributors (buildings, roads), Open-Meteo ERA5 reanalysis (weather). For early design and education.</p>
+    </div>
+  </aside>
+
+  <section class="canvas">
+    <div class="board" id="board">
+      <div class="b-head">
+        <div class="grow"><h2 id="bTitle">Site analysis</h2><div class="meta" id="bMeta">Pick a site and press "Make sheet".</div></div>
+        <div class="b-keys" id="bKeys"></div>
+      </div>
+      <div class="b-fg"><h3>Figure-ground</h3><p class="sub" id="fgSub">Buildings around the site</p>
+        <svg id="fg" viewBox="0 0 1000 1000"><rect width="1000" height="1000" fill="#f6f5f1"/></svg>
+        <div class="legend" id="fgLegend"></div></div>
+      <div class="b-cell b-sun"><h3>Sun path</h3><p class="sub">21 Dec, 20 Mar, 21 Jun · altitude rings 0°, 30°, 60°</p>
+        <div class="fig" id="sun"><div class="wait">–</div></div>
+        <div class="legend" id="sunLegend"></div></div>
+      <div class="b-cell b-wind"><h3>Wind rose</h3><p class="sub">Share of hours by direction and speed (m/s), whole year</p>
+        <div class="fig" id="wind"><div class="wait">–</div></div>
+        <div class="legend" id="windLegend"></div></div>
+      <div class="b-cell b-temp"><h3>Temperature</h3><p class="sub">Mean daily min–max, monthly mean, comfort 18–26 °C</p>
+        <div class="fig" id="temp"><div class="wait">–</div></div>
+        <div class="legend"><span><i style="background:#f3c9bd"></i>Min–max</span><span><i style="background:#c8553d"></i>Mean</span><span><i style="background:#e6efe0"></i>Comfort</span></div></div>
+      <div class="b-cell b-comf"><h3>Rain and sun</h3><p class="sub">Monthly precipitation (mm), daily solar radiation (kWh/m²)</p>
+        <div class="fig" id="rain"><div class="wait">–</div></div>
+        <div class="legend"><span><i style="background:#5e8cb8"></i>Precipitation</span><span><i style="background:#e0a23a"></i>Solar radiation</span></div></div>
+      <div class="b-notes"><h3>Design notes</h3><p class="sub">What the site and climate suggest</p>
+        <ul class="notes" id="notes"></ul>
+        <p class="b-foot" id="bFoot"></p></div>
+    </div>
+  </section>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="../../assets/atools.js"></script>
+<script src="../../assets/lib/sun.js"></script>
+<script src="../../assets/lib/climate.js"></script>
+<script src="../../assets/lib/fabric.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+const { r1, MONTH_NAMES } = ATClimate;
+let R = 500;
+
+// ---------- Location ----------
+const saved = ATools.getSite();
+let site = saved || { lat: 41.0082, lng: 28.9784, name: 'Istanbul' };
+const pick = ATools.baseMap('pick', [site.lat, site.lng], saved ? 14 : 11);
+const marker = L.circleMarker([site.lat, site.lng], { radius: 8, color: '#fff', weight: 2, fillColor: '#c8553d', fillOpacity: 1 }).addTo(pick);
+function setSite(s, save = true) {
+  site = s; marker.setLatLng([s.lat, s.lng]);
+  $('where').textContent = (s.name ? s.name + ' · ' : '') + s.lat.toFixed(4) + ', ' + s.lng.toFixed(4);
+  if (save) ATools.setSite(s);
+}
+setSite(site, false);
+pick.on('click', e => setSite({ lat: e.latlng.lat, lng: e.latlng.lng }));
+$('go').onclick = async () => {
+  const q = $('q').value.trim(); if (!q) return;
+  try { const s = await ATools.geocode(q); if (!s) return alert('Place not found.'); pick.setView([s.lat, s.lng], 14); setSite(s); }
+  catch { alert('Search failed. Tap the map instead.'); }
+};
+$('q').addEventListener('keydown', e => { if (e.key === 'Enter') $('go').click(); });
+document.querySelectorAll('#radius button').forEach(b => b.onclick = () => {
+  document.querySelectorAll('#radius button').forEach(x => x.classList.toggle('on', x === b)); R = +b.dataset.r;
+});
+const lastYear = new Date().getFullYear() - 1;
+for (let y = lastYear; y >= lastYear - 10; y--) $('year').add(new Option(y, y));
+$('title').addEventListener('input', () => $('bTitle').textContent = $('title').value.trim() || 'Site analysis');
+
+// ---------- Sheet ----------
+const wait = t => `<div class="wait">${t}</div>`;
+const key = (v, label) => `<div><b>${v}</b>${label}</div>`;
+
+async function make() {
+  const s = site, year = +$('year').value;
+  $('make').disabled = true;
+  $('status').innerHTML = '<span class="spinner"></span>Loading buildings and a year of weather…';
+  $('bTitle').textContent = $('title').value.trim() || 'Site analysis';
+  const author = $('author').value.trim();
+  $('bMeta').textContent = [s.name, `${s.lat.toFixed(4)}, ${s.lng.toFixed(4)}`, author, new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })].filter(Boolean).join(' · ');
+  ['wind', 'temp', 'rain'].forEach(id => $(id).innerHTML = wait('<span class="spinner"></span>Loading…'));
+  $('fgSub').textContent = 'Loading buildings…';
+  $('notes').innerHTML = ''; $('bKeys').innerHTML = '';
+
+  // Sun is computed locally, so it appears at once.
+  const tz = ATSun.guessTz(s.lat, s.lng);
+  $('sun').innerHTML = `<svg viewBox="0 0 300 300">${ATSun.pathSvg(s.lat, s.lng, { year, tz })}</svg>`;
+  const jun = s.lat >= 0 ? [6, 21] : [12, 21], dec = s.lat >= 0 ? [12, 21] : [6, 21];
+  const sun = {
+    longDay: ATSun.dayLength(s.lat, s.lng, year, ...jun), shortDay: ATSun.dayLength(s.lat, s.lng, year, ...dec),
+    highNoon: ATSun.noonAltitude(s.lat, s.lng, year, ...jun), lowNoon: ATSun.noonAltitude(s.lat, s.lng, year, ...dec)
+  };
+  $('sunLegend').innerHTML = `<span><i style="background:#c0392b"></i>21 Jun</span><span><i style="background:#5d8a3c"></i>20 Mar</span><span><i style="background:#2f5d8a"></i>21 Dec</span><span>Times UTC${tz >= 0 ? '+' : ''}${tz}</span>`;
+
+  const [fab, cli] = await Promise.allSettled([ATFabric.load(s, R), ATClimate.fetchYear(s, year)]);
+  const geo = fab.status === 'fulfilled' ? fab.value : null, d = cli.status === 'fulfilled' ? cli.value : null;
+
+  let st = null;
+  if (geo) {
+    $('fg').innerHTML = ATFabric.svg(geo, { id: 'sheet' });
+    st = ATFabric.stats(geo);
+    $('fgSub').textContent = `${2 * R >= 1000 ? (2 * R / 1000) + ' km' : 2 * R + ' m'} square around the site · ${st.count.toLocaleString('en-US')} buildings`;
+    $('fgLegend').innerHTML = `<span><i style="background:#111"></i>Buildings</span><span><i style="background:#c9c6bd"></i>Streets</span><span><i style="background:#dfe8d6"></i>Green</span><span><i style="background:#d6e3ee"></i>Water</span><span><i style="background:#c8553d;border-radius:50%"></i>Site</span>`;
+  } else {
+    $('fgSub').textContent = 'Could not load OpenStreetMap buildings. The server may be busy; press "Make sheet" again in a minute.';
+  }
+  if (d) {
+    $('wind').innerHTML = ATClimate.rose(d, 'year');
+    $('windLegend').innerHTML = ATClimate.roseLegend();
+    $('temp').innerHTML = ATClimate.chartTemp(d.months);
+    $('rain').innerHTML = ATClimate.chartRainSun(d.months);
+  } else {
+    ['wind', 'temp', 'rain'].forEach(id => $(id).innerHTML = wait('Weather data could not be loaded.'));
+  }
+
+  // Key figures
+  const keys = [];
+  if (d) {
+    const { hot, cold } = ATClimate.extremes(d);
+    keys.push(key(r1(d.mean) + ' °C', 'Mean temperature'), key(`${r1(d.months[hot].max)} / ${r1(d.months[cold].min)} °C`, `${MONTH_NAMES[hot]} max / ${MONTH_NAMES[cold]} min`),
+      key(Math.round(d.rain) + ' mm', 'Rain per year'), key(Math.round(d.sun).toLocaleString('en-US') + ' kWh/m²', 'Solar per year'));
+  }
+  keys.push(key(`${r1(sun.longDay)} / ${r1(sun.shortDay)} h`, 'Longest / shortest day'), key(`${Math.round(sun.highNoon)}° / ${Math.round(sun.lowNoon)}°`, 'Noon sun summer / winter'));
+  if (st) keys.push(key(Math.round(st.coverage * 100) + '%', 'Built coverage'), key(st.grain, `Grain · median ${Math.round(st.median)} m²`));
+  $('bKeys').innerHTML = keys.join('');
+
+  // Notes: site fabric and sun first, then climate.
+  const notes = [];
+  if (st) notes.push(`<b>${st.grain} grain, ${Math.round(st.coverage * 100)}% built.</b> ${st.coverage > .35 ? 'A dense fabric: read the street wall, courtyards and gaps before placing the building.' : st.coverage > .15 ? 'A mixed fabric with room between buildings: consider how the new building completes or opens the block.' : 'An open setting: the building will be seen from far away, so the long views and the landscape matter.'}`);
+  notes.push(sun.lowNoon > 3
+    ? `<b>Sun.</b> At noon the sun stands ${Math.round(sun.highNoon)}° high in summer and only ${Math.round(sun.lowNoon)}° in winter, so winter noon shadows are about ${r1(1 / Math.tan(sun.lowNoon * Math.PI / 180))} times the height of the building casting them.`
+    : `<b>Sun.</b> The winter sun barely rises (${Math.round(sun.lowNoon)}° at noon); daylight, not shading, drives the design for much of the year.`);
+  if (d) notes.push(...ATClimate.notes(d));
+  $('notes').innerHTML = notes.map((t, i) => `<li data-i="${i + 1}"><span>${t}</span></li>`).join('');
+  $('bFoot').textContent = `Sources: © OpenStreetMap contributors · Open-Meteo, ERA5 reanalysis ${year} · Sun position computed for ${s.lat.toFixed(3)}, ${s.lng.toFixed(3)}. Made with a_tools.`;
+
+  $('status').textContent = geo && d ? 'Sheet ready.' : 'Sheet made with missing parts; see the messages on the board.';
+  $('make').disabled = false;
+  $('print').disabled = false;
+}
+
+$('make').onclick = make;
+$('print').onclick = () => window.print();
+</script>
+</body>
+</html>

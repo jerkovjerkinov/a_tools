@@ -12,6 +12,7 @@ Free, browser-based design tools for architects and architecture students.
 | Zoning Envelope | Prototype | [`tools/zoning/`](tools/zoning/index.html) |
 | Figure-Ground | Prototype | [`tools/figure-ground/`](tools/figure-ground/index.html) |
 | Walkability | Prototype | [`tools/walkability/`](tools/walkability/index.html) |
+| Site Analysis Sheet | Prototype | [`tools/site-sheet/`](tools/site-sheet/index.html) |
 
 ### Sun & Shadow Study
 
@@ -39,7 +40,11 @@ Buildings, roads, water and green areas from OpenStreetMap (Overpass) around the
 
 The OSM footpath and street network within a 15-minute walk, coloured by 5 / 10 / 15 minute bands (in-browser Dijkstra), with daily-need places (food, grocery, schools, health, transit, parks) counted per band and a 15-minute neighbourhood score.
 
-All tools share `assets/atools.css` and `assets/atools.js`; the site set on the hub (or in any tool) is stored in the browser and reused by the others.
+### Site Analysis Sheet
+
+One A3 landscape board for the site: figure-ground, sun path, wind rose, temperature and rain/sun charts, key figures and design notes. Prints to A3 or saves as PDF from the browser.
+
+All tools share `assets/atools.css` and `assets/atools.js`. Calculations used by more than one tool live in `assets/lib/`: `sun.js` (sun position, sun path), `climate.js` (Open-Meteo download, climate summary, charts, design notes) and `fabric.js` (OSM buildings, figure-ground drawing). Also, the site set on the hub (or in any tool) is stored in the browser and reused by the others.
 
 Each tool is a single static HTML file with no build step. Open it in a browser or serve the repo with any static host.
 
