@@ -1,0 +1,395 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>3D Context · a_tools</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="../../assets/atools.css">
+<style>
+  #pick { height: 220px; border-radius: var(--radius-sm); border: 1px solid var(--line); overflow: hidden; margin-top: 8px; }
+  .view { padding: 22px; }
+  .view .card { max-width: 1100px; margin: 0 auto; }
+  #axo { width: 100%; height: auto; display: block; background: #fbfaf7; border-radius: var(--radius-sm); }
+  .view .chips { margin: 10px 0 0; }
+  .exports { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+  @media (max-width: 820px) { .view { padding: 12px; } }
+</style>
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="../../index.html"><span class="brand-mark"></span>a_tools</a>
+  <span class="crumb">/ <b>3D Context</b></span>
+  <span class="spacer"></span>
+  <span class="site-pill" id="sitePill" hidden></span>
+</header>
+
+<main class="tool">
+  <aside class="panel">
+    <h1>3D Context</h1>
+    <p class="lead">The buildings and ground around your site as a 3D model, ready to open in Rhino, AutoCAD, Revit, SketchUp Pro or Blender.</p>
+
+    <div class="group">
+      <p class="group-title"><span class="step">1</span>Area</p>
+      <div class="row">
+        <input id="q" type="text" placeholder="Search a place">
+        <button id="go" class="btn" style="flex:0 0 auto">Go</button>
+      </div>
+      <div id="pick"></div>
+      <p class="hint" id="where">Tap the map to place the site.</p>
+      <div class="field" style="margin-top:10px"><span class="label">Size</span>
+        <div class="seg" id="radius"><button data-r="100">200 m</button><button data-r="250" class="on">500 m</button><button data-r="500">1 km</button></div>
+      </div>
+    </div>
+
+    <div class="group">
+      <p class="group-title"><span class="step">2</span>Model</p>
+      <div class="field"><label for="defH">Height when unknown <span class="unit">m</span></label><input id="defH" type="number" value="9" min="2" max="200" step="0.5"></div>
+      <div class="field"><label for="floorH">Height per floor <span class="unit">m</span></label><input id="floorH" type="number" value="3" min="2" max="6" step="0.1"></div>
+      <label class="check"><input id="oTerrain" type="checkbox" checked>Terrain (90 m elevation grid)</label>
+      <label class="check"><input id="oRoads" type="checkbox" checked>Street centre lines (DXF only)</label>
+      <button id="load" class="btn primary block">Build 3D model</button>
+      <p class="hint" id="status"></p>
+    </div>
+
+    <div class="group">
+      <p class="group-title">Model</p>
+      <div class="stats">
+        <div class="stat"><b id="sB">–</b><span>Buildings</span></div>
+        <div class="stat"><b id="sKnown">–</b><span>With height data</span></div>
+        <div class="stat"><b id="sTall">–</b><span>Tallest</span></div>
+        <div class="stat"><b id="sElev">–</b><span>Ground, lowest–highest</span></div>
+      </div>
+    </div>
+
+    <div class="group">
+      <p class="group-title"><span class="step">3</span>Download</p>
+      <div class="exports">
+        <button id="xObj" class="btn" disabled>OBJ</button>
+        <button id="xDxf" class="btn" disabled>DXF</button>
+        <button id="xStl" class="btn" disabled>STL</button>
+      </div>
+      <p class="hint">Units are metres. The site point is at 0, 0, 0 and north is +Y (OBJ is Y-up, so north is −Z there).</p>
+      <p class="hint"><b>OBJ</b> Rhino, Blender, 3ds Max (Rhino: keep "Map OBJ Y to Rhino Z" on). <b>DXF</b> 3D faces on layers Buildings, Terrain and Streets for AutoCAD, Rhino, Revit and SketchUp Pro. <b>STL</b> 3D printing and most modelers.</p>
+      <p class="hint">Data: buildings and heights © OpenStreetMap contributors; elevation from Copernicus DEM via Open-Meteo. Heights are often missing in OSM, so check them before you rely on them.</p>
+    </div>
+  </aside>
+
+  <section class="canvas">
+    <div class="view">
+      <div class="card">
+        <h3>Preview</h3><p class="sub" id="vSub">Pick an area and press "Build 3D model".</p>
+        <svg id="axo" viewBox="0 0 1000 700"></svg>
+        <div class="chips" id="views">
+          <button class="chip on" data-a="225">From south-west</button><button class="chip" data-a="135">From south-east</button>
+          <button class="chip" data-a="45">From north-east</button><button class="chip" data-a="315">From north-west</button>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/earcut@2.2.4/dist/earcut.min.js"></script>
+<script src="../../assets/atools.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+const rad = Math.PI / 180;
+let site = ATools.getSite() || { lat: 41.0082, lng: 28.9784, name: 'Istanbul' };
+let R = 250, viewAz = 225, model = null;
+
+// ---------- Area picker ----------
+const pick = ATools.baseMap('pick', [site.lat, site.lng], 15);
+const marker = L.circleMarker([site.lat, site.lng], { radius: 7, color: '#fff', weight: 2, fillColor: '#c8553d', fillOpacity: 1 }).addTo(pick);
+const ring = L.rectangle([[0, 0], [0, 0]], { color: '#1b1b19', weight: 1, fill: false, dashArray: '4 4' }).addTo(pick);
+function setSite(s, save = true) {
+  site = s; marker.setLatLng([s.lat, s.lng]); drawRing();
+  $('where').textContent = (s.name ? s.name + ' · ' : '') + s.lat.toFixed(4) + ', ' + s.lng.toFixed(4);
+  if (save) ATools.setSite(s);
+}
+function drawRing() {
+  const dLat = R / 110540, dLng = R / (111320 * Math.cos(site.lat * rad));
+  ring.setBounds([[site.lat - dLat, site.lng - dLng], [site.lat + dLat, site.lng + dLng]]);
+}
+setSite(site, false);
+pick.fitBounds(ring.getBounds(), { padding: [10, 10] });
+pick.on('click', e => setSite({ lat: e.latlng.lat, lng: e.latlng.lng }));
+$('go').onclick = async () => {
+  const q = $('q').value.trim(); if (!q) return;
+  try { const s = await ATools.geocode(q); if (!s) return alert('Place not found.'); setSite(s); pick.fitBounds(ring.getBounds()); }
+  catch { alert('Search failed. Tap the map instead.'); }
+};
+$('q').addEventListener('keydown', e => { if (e.key === 'Enter') $('go').click(); });
+document.querySelectorAll('#radius button').forEach(b => b.onclick = () => {
+  document.querySelectorAll('#radius button').forEach(x => x.classList.toggle('on', x === b));
+  R = +b.dataset.r; drawRing(); pick.fitBounds(ring.getBounds());
+});
+document.querySelectorAll('#views .chip').forEach(c => c.onclick = () => {
+  document.querySelectorAll('#views .chip').forEach(x => x.classList.toggle('on', x === c));
+  viewAz = +c.dataset.a; if (model) drawPreview();
+});
+
+// ---------- Data ----------
+const xy = (lat, lng, o) => [(lng - o.lng) * 111320 * Math.cos(o.lat * rad), (lat - o.lat) * 110540];
+const num = v => { const n = parseFloat(String(v || '').replace(',', '.')); return isFinite(n) ? n : null; };
+function signedArea(r) { let a = 0; for (let i = 0; i < r.length; i++) { const p = r[i], q = r[(i + 1) % r.length]; a += p[0] * q[1] - q[0] * p[1]; } return a / 2; }
+// Drop the closing duplicate point and orient: outer rings counter-clockwise, holes clockwise.
+function clean(r, ccw) {
+  r = r.slice(); if (r.length > 1 && r[0][0] === r[r.length - 1][0] && r[0][1] === r[r.length - 1][1]) r.pop();
+  if ((signedArea(r) > 0) !== ccw) r.reverse();
+  return r;
+}
+function inside(p, r) {
+  let c = false;
+  for (let i = 0, j = r.length - 1; i < r.length; j = i++)
+    if ((r[i][1] > p[1]) !== (r[j][1] > p[1]) && p[0] < (r[j][0] - r[i][0]) * (p[1] - r[i][1]) / (r[j][1] - r[i][1]) + r[i][0]) c = !c;
+  return c;
+}
+
+async function fetchOsm(o) {
+  const dLat = R / 110540, dLng = R / (111320 * Math.cos(o.lat * rad));
+  const bb = [o.lat - dLat, o.lng - dLng, o.lat + dLat, o.lng + dLng].map(x => x.toFixed(6)).join(',');
+  const q = `[out:json][timeout:60][bbox:${bb}];
+    (way["building"];relation["building"]["type"="multipolygon"];); out geom;
+    ${$('oRoads').checked ? 'way["highway"]["highway"!~"^(proposed|construction|platform|corridor|elevator|steps)$"]; out geom;' : ''}`;
+  const r = await fetch('https://overpass-api.de/api/interpreter', { method: 'POST', body: 'data=' + encodeURIComponent(q) });
+  if (!r.ok) throw new Error(r.status);
+  return r.json();
+}
+
+// 10 × 10 elevation grid (one Open-Meteo request), heights relative to the site point.
+const GRID = 10;
+async function fetchTerrain(o) {
+  const dLat = R / 110540, dLng = R / (111320 * Math.cos(o.lat * rad)), lats = [], lngs = [];
+  for (let j = 0; j < GRID; j++) for (let i = 0; i < GRID; i++) {
+    lats.push((o.lat - dLat + 2 * dLat * j / (GRID - 1)).toFixed(5));
+    lngs.push((o.lng - dLng + 2 * dLng * i / (GRID - 1)).toFixed(5));
+  }
+  const r = await fetch(`https://api.open-meteo.com/v1/elevation?latitude=${lats.join(',')}&longitude=${lngs.join(',')}`);
+  if (!r.ok) throw new Error(r.status);
+  const e = (await r.json()).elevation;
+  if (!e || e.length !== GRID * GRID) throw new Error('elevation');
+  const T = { e, R, step: 2 * R / (GRID - 1) };
+  T.base = 0; T.base = groundAt(T, 0, 0);
+  T.min = Math.min(...e); T.max = Math.max(...e);
+  return T;
+}
+// Bilinear ground height (relative to the site point) at local x, y.
+function groundAt(T, x, y) {
+  if (!T) return 0;
+  const gx = Math.min(GRID - 1.001, Math.max(0, (x + T.R) / T.step)), gy = Math.min(GRID - 1.001, Math.max(0, (y + T.R) / T.step));
+  const i = Math.floor(gx), j = Math.floor(gy), fx = gx - i, fy = gy - j, E = (a, b) => T.e[b * GRID + a];
+  return E(i, j) * (1 - fx) * (1 - fy) + E(i + 1, j) * fx * (1 - fy) + E(i, j + 1) * (1 - fx) * fy + E(i + 1, j + 1) * fx * fy - T.base;
+}
+
+function osmHeight(t, defH, floorH) {
+  const h = num(t.height);
+  if (h) return { h, known: true };
+  const lv = num(t['building:levels']);
+  if (lv) return { h: (lv + (num(t['roof:levels']) || 0)) * floorH, known: true };
+  return { h: defH, known: false };
+}
+
+function buildModel(j, T) {
+  const defH = +$('defH').value || 9, floorH = +$('floorH').value || 3;
+  const buildings = [], streets = [];
+  const inBox = r => r.some(([x, y]) => Math.abs(x) <= R && Math.abs(y) <= R);
+  j.elements.forEach(el => {
+    const t = el.tags || {};
+    if (t.highway) {
+      if (el.geometry) streets.push(el.geometry.map(g => xy(g.lat, g.lon, site)));
+      return;
+    }
+    if (!t.building) return;
+    let polys = [];
+    if (el.type === 'way' && el.geometry && el.geometry.length > 3) polys = [{ outer: el.geometry.map(g => xy(g.lat, g.lon, site)), holes: [] }];
+    else if (el.type === 'relation') {
+      const ms = (el.members || []).filter(m => m.geometry && m.geometry.length > 3);
+      polys = ms.filter(m => m.role !== 'inner').map(m => ({ outer: m.geometry.map(g => xy(g.lat, g.lon, site)), holes: [] }));
+      ms.filter(m => m.role === 'inner').forEach(m => {
+        const hole = m.geometry.map(g => xy(g.lat, g.lon, site)), p = polys.find(p => inside(hole[0], p.outer));
+        if (p) p.holes.push(hole);
+      });
+    }
+    const { h, known } = osmHeight(t, defH, floorH);
+    const minH = num(t.min_height) || 0;
+    polys.forEach(p => {
+      const outer = clean(p.outer, true);
+      if (outer.length < 3 || !inBox(outer) || Math.abs(signedArea(outer)) < 2) return;
+      const holes = p.holes.map(hh => clean(hh, false)).filter(hh => hh.length >= 3);
+      const z0 = Math.min(...outer.map(([x, y]) => groundAt(T, x, y)));
+      buildings.push({ outer, holes, z0: z0 + minH, z1: z0 + Math.max(h, minH + 1), known, tags: t });
+    });
+  });
+  return { buildings, streets, T };
+}
+
+// Triangles of one building: walls (quads split in two), roof and floor (earcut).
+function buildingTris(b) {
+  const tris = [], rings = [b.outer, ...b.holes];
+  rings.forEach(r => r.forEach((p, i) => {
+    const q = r[(i + 1) % r.length];
+    const a = [p[0], p[1], b.z0], bb = [q[0], q[1], b.z0], c = [q[0], q[1], b.z1], d = [p[0], p[1], b.z1];
+    tris.push([a, bb, c], [a, c, d]);
+  }));
+  const flat = [], holeIdx = [], pts = [];
+  rings.forEach((r, k) => { if (k) holeIdx.push(pts.length); r.forEach(p => { pts.push(p); flat.push(p[0], p[1]); }); });
+  const idx = earcut(flat, holeIdx.length ? holeIdx : null, 2);
+  for (let i = 0; i < idx.length; i += 3) {
+    let [A, B, C] = [idx[i], idx[i + 1], idx[i + 2]].map(k => pts[k]);
+    if ((B[0] - A[0]) * (C[1] - A[1]) - (C[0] - A[0]) * (B[1] - A[1]) < 0) [B, C] = [C, B];
+    tris.push([[A[0], A[1], b.z1], [B[0], B[1], b.z1], [C[0], C[1], b.z1]]);   // roof, facing up
+    tris.push([[A[0], A[1], b.z0], [C[0], C[1], b.z0], [B[0], B[1], b.z0]]);   // floor, facing down
+  }
+  return tris;
+}
+function terrainTris(T) {
+  const tris = [], P = (i, j) => [-T.R + i * T.step, -T.R + j * T.step, T.e[j * GRID + i] - T.base];
+  for (let j = 0; j < GRID - 1; j++) for (let i = 0; i < GRID - 1; i++) {
+    const a = P(i, j), b = P(i + 1, j), c = P(i + 1, j + 1), d = P(i, j + 1);
+    tris.push([a, b, c], [a, c, d]);
+  }
+  return tris;
+}
+
+async function load() {
+  $('status').innerHTML = '<span class="spinner"></span>Loading buildings' + ($('oTerrain').checked ? ' and terrain…' : '…');
+  $('load').disabled = true;
+  const o = { ...site };
+  const [osm, ter] = await Promise.allSettled([fetchOsm(o), $('oTerrain').checked ? fetchTerrain(o) : Promise.resolve(null)]);
+  if (osm.status !== 'fulfilled') {
+    $('status').textContent = 'Could not load OpenStreetMap data. The server may be busy; try again in a minute or pick a smaller area.';
+    $('load').disabled = false; return;
+  }
+  const T = ter.status === 'fulfilled' ? ter.value : null;
+  model = buildModel(osm.value, T);
+  model.site = o;
+  const bs = model.buildings, known = bs.filter(b => b.known).length;
+  $('sB').textContent = bs.length.toLocaleString('en-US');
+  $('sKnown').textContent = bs.length ? Math.round(100 * known / bs.length) + '%' : '–';
+  $('sTall').textContent = bs.length ? Math.round(Math.max(...bs.map(b => b.z1 - b.z0))) + ' m' : '–';
+  $('sElev').textContent = T ? `${Math.round(T.min)}–${Math.round(T.max)} m` : 'Flat';
+  $('status').textContent = `${bs.length.toLocaleString('en-US')} buildings ready.` +
+    ($('oTerrain').checked && !T ? ' Terrain could not be loaded, so the ground is flat.' : '');
+  ['xObj', 'xDxf', 'xStl'].forEach(id => $(id).disabled = !bs.length);
+  drawPreview();
+  $('load').disabled = false;
+}
+
+// ---------- Preview: painter's-algorithm axonometric in SVG ----------
+function drawPreview() {
+  const a = (viewAz - 180) * rad, ca = Math.cos(a), sa = Math.sin(a), k = 0.5;
+  const rot = ([x, y, z]) => [x * ca - y * sa, x * sa + y * ca, z];
+  const faces = [];
+  const shade = (n, base) => {   // n: rotated outward normal (x, y); light from the viewer's left
+    const l = Math.max(0, (-n[0] * .6 - n[1] * .8));
+    const v = Math.round(base + 60 * l);
+    return `rgb(${v},${v - 3},${v - 10})`;
+  };
+  model.buildings.forEach(b => {
+    [b.outer, ...b.holes].forEach(r => r.forEach((p, i) => {
+      const q = r[(i + 1) % r.length];
+      const A = rot([p[0], p[1], b.z0]), B = rot([q[0], q[1], b.z0]);
+      const nx = B[1] - A[1], ny = -(B[0] - A[0]);   // outward normal for counter-clockwise outer rings
+      if (ny >= 0) return;                            // faces away from the viewer
+      const len = Math.hypot(nx, ny) || 1;
+      faces.push({ d: (A[1] + B[1]) / 2, pts: [A, B, rot([q[0], q[1], b.z1]), rot([p[0], p[1], b.z1])], fill: shade([nx / len, ny / len], 165) });
+    }));
+    const roof = b.outer.map(p => rot([p[0], p[1], b.z1]));
+    faces.push({ d: roof.reduce((s, p) => s + p[1], 0) / roof.length + 0.01, pts: roof, holes: b.holes.map(h => h.map(p => rot([p[0], p[1], b.z1]))), fill: '#f4f2ec' });
+  });
+  let ground = '';
+  if (model.T) {
+    terrainTris(model.T).forEach(t => faces.push({ d: Math.max(...t.map(p => rot(p)[1])) + 1e6, pts: t.map(rot), fill: '#e9e6dd', ground: true }));
+  } else {
+    const c = [[-R, -R, 0], [R, -R, 0], [R, R, 0], [-R, R, 0]].map(rot);
+    ground = c;
+  }
+  faces.sort((f, g) => g.d - f.d);
+  // Fit to the viewBox.
+  const proj = p => [p[0], -p[1] * k - p[2]];
+  const all = faces.flatMap(f => f.pts.map(proj)).concat(ground ? ground.map(proj) : []);
+  const xs = all.map(p => p[0]), ys = all.map(p => p[1]);
+  const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys);
+  const S = Math.min(940 / (maxX - minX || 1), 640 / (maxY - minY || 1));
+  const ox = 500 - (minX + maxX) / 2 * S, oy = 350 - (minY + maxY) / 2 * S;
+  const P = p => { const [u, v] = proj(p); return (ox + u * S).toFixed(1) + ',' + (oy + v * S).toFixed(1); };
+  const ring = pts => 'M' + pts.map(P).join('L') + 'Z';
+  let s = '';
+  if (ground) s += `<path d="${ring(ground)}" fill="#e9e6dd" stroke="#d6d2c7"/>`;
+  faces.forEach(f => {
+    s += f.ground ? `<path d="${ring(f.pts)}" fill="${f.fill}" stroke="${f.fill}" stroke-width=".6"/>`
+      : `<path d="${ring(f.pts)}${(f.holes || []).map(ring).join('')}" fill="${f.fill}" fill-rule="evenodd" stroke="#4a4945" stroke-width=".35" stroke-linejoin="round"/>`;
+  });
+  // Site marker at ground level and a north arrow.
+  const z0 = model.T ? groundAt(model.T, 0, 0) : 0, sp = P(rot([0, 0, z0])).split(',');
+  s += `<circle cx="${sp[0]}" cy="${sp[1]}" r="6" fill="#c8553d" stroke="#fff" stroke-width="2"/>`;
+  const n = rot([0, 1, 0]), nl = Math.hypot(n[0], n[1] * k) || 1, nx = n[0] / nl, ny = -n[1] * k / nl;
+  s += `<g transform="translate(950 60)"><circle r="22" fill="#fff" stroke="#e3e0d8"/><path d="M${nx * 16} ${ny * 16} L${-ny * 8 - nx * 12} ${nx * 8 - ny * 12} L${-nx * 5} ${-ny * 5} L${ny * 8 - nx * 12} ${-nx * 8 - ny * 12}Z" fill="#1b1b19"/>` +
+       `<text x="${nx * 32}" y="${ny * 32 + 4}" text-anchor="middle" font-size="12" font-weight="600" fill="#1b1b19">N</text></g>`;
+  $('axo').innerHTML = s;
+  const dirs = { 225: 'south-west', 135: 'south-east', 45: 'north-east', 315: 'north-west' };
+  $('vSub').textContent = `${2 * R >= 1000 ? 2 * R / 1000 + ' km' : 2 * R + ' m'} square around ${model.site.name || 'the site'}, seen from the ${dirs[viewAz]}. Grey roofs are flat; real roof shapes are not modelled.`;
+}
+
+// ---------- Export ----------
+function allTris() {
+  const parts = model.buildings.map((b, i) => ({ name: 'building_' + (i + 1), layer: 'Buildings', tris: buildingTris(b) }));
+  if (model.T) parts.unshift({ name: 'terrain', layer: 'Terrain', tris: terrainTris(model.T) });
+  return parts;
+}
+const f3 = v => (Math.round(v * 1000) / 1000).toString();
+function fileBase() { return 'context-' + (model.site.name || 'site').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') + `-${2 * R}m`; }
+
+function exportObj() {
+  const out = ['# a_tools 3D context · metres · origin at site · Y up, -Z north', `# ${model.site.lat.toFixed(6)}, ${model.site.lng.toFixed(6)} · © OpenStreetMap contributors`];
+  let n = 1;
+  allTris().forEach(p => {
+    out.push('o ' + p.name);
+    p.tris.forEach(t => {
+      t.forEach(([x, y, z]) => out.push(`v ${f3(x)} ${f3(z)} ${f3(-y)}`));
+      out.push(`f ${n} ${n + 1} ${n + 2}`); n += 3;
+    });
+  });
+  ATools.download(fileBase() + '.obj', out.join('\n') + '\n', 'text/plain');
+}
+function exportDxf() {
+  const o = ['0', 'SECTION', '2', 'ENTITIES'];
+  allTris().forEach(p => p.tris.forEach(t => {
+    o.push('0', '3DFACE', '8', p.layer);
+    [...t, t[2]].forEach(([x, y, z], i) => o.push(String(10 + i), f3(x), String(20 + i), f3(y), String(30 + i), f3(z)));
+  }));
+  if (model.streets.length) model.streets.forEach(line => {
+    o.push('0', 'POLYLINE', '8', 'Streets', '66', '1', '70', '8');
+    line.forEach(([x, y]) => o.push('0', 'VERTEX', '8', 'Streets', '10', f3(x), '20', f3(y), '30', f3(groundAt(model.T, x, y)), '70', '32'));
+    o.push('0', 'SEQEND', '8', 'Streets');
+  });
+  o.push('0', 'ENDSEC', '0', 'EOF');
+  ATools.download(fileBase() + '.dxf', o.join('\n') + '\n', 'application/dxf');
+}
+function exportStl() {
+  const tris = allTris().flatMap(p => p.tris);
+  const buf = new ArrayBuffer(84 + tris.length * 50), dv = new DataView(buf);
+  const head = 'a_tools 3D context, metres, Z up';
+  for (let i = 0; i < head.length; i++) dv.setUint8(i, head.charCodeAt(i));
+  dv.setUint32(80, tris.length, true);
+  tris.forEach((t, i) => {
+    const o = 84 + i * 50;
+    const [a, b, c] = t, u = [b[0] - a[0], b[1] - a[1], b[2] - a[2]], v = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+    const nrm = [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]], l = Math.hypot(...nrm) || 1;
+    nrm.forEach((x, j) => dv.setFloat32(o + j * 4, x / l, true));
+    t.forEach((p, k) => p.forEach((x, j) => dv.setFloat32(o + 12 + k * 12 + j * 4, x, true)));
+  });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([buf], { type: 'model/stl' })); a.download = fileBase() + '.stl'; a.click();
+}
+
+$('load').onclick = load;
+$('xObj').onclick = exportObj;
+$('xDxf').onclick = exportDxf;
+$('xStl').onclick = exportStl;
+</script>
+</body>
+</html>

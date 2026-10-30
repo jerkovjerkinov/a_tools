@@ -13,6 +13,7 @@ Free, browser-based design tools for architects and architecture students.
 | Figure-Ground | Prototype | [`tools/figure-ground/`](tools/figure-ground/index.html) |
 | Walkability | Prototype | [`tools/walkability/`](tools/walkability/index.html) |
 | Site Analysis Sheet | Prototype | [`tools/site-sheet/`](tools/site-sheet/index.html) |
+| 3D Context | Prototype | [`tools/context-3d/`](tools/context-3d/index.html) |
 
 ### Sun & Shadow Study
 
@@ -43,6 +44,10 @@ The OSM footpath and street network within a 15-minute walk, coloured by 5 / 10 
 ### Site Analysis Sheet
 
 One A3 landscape board for the site: figure-ground, sun path, wind rose, temperature and rain/sun charts, key figures and design notes. Prints to A3 or saves as PDF from the browser.
+
+### 3D Context
+
+OSM buildings (heights from `height`, `building:levels` or an editable default; courtyards kept) and an optional 10 × 10 Copernicus DEM elevation grid from Open-Meteo, previewed as an axonometric from four directions and exported as closed solids in OBJ (Y up), DXF (3DFACE on Buildings / Terrain / Streets layers) or binary STL. Metres, origin at the site point. Roofs are flat. Uses [earcut](https://github.com/mapbox/earcut) for roof triangulation.
 
 All tools share `assets/atools.css` and `assets/atools.js`. Calculations used by more than one tool live in `assets/lib/`: `sun.js` (sun position, sun path), `climate.js` (Open-Meteo download, climate summary, charts, design notes) and `fabric.js` (OSM buildings, figure-ground drawing). Also, the site set on the hub (or in any tool) is stored in the browser and reused by the others.
 
