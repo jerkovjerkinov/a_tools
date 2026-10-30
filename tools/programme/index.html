@@ -1,0 +1,338 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Programme &amp; Adjacency · a_tools</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="../../assets/atools.css">
+<style>
+  .rooms { width: 100%; border-collapse: collapse; font-size: 12.5px; table-layout: fixed; }
+  .rooms th { text-align: left; font-weight: 500; color: var(--muted); font-size: 11px; padding: 0 4px 4px; }
+  .rooms td { padding: 2px; }
+  .rooms input, .rooms select { height: 30px; padding: 0 6px; font-size: 12.5px; }
+  .rooms select { padding: 0 2px; }
+  .rooms td.num input { text-align: right; }
+  .rooms .x { width: 26px; height: 30px; border: 0; background: none; color: var(--muted); cursor: pointer; font-size: 16px; }
+  .rooms .x:hover { color: var(--red); }
+  .zone-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; }
+  .bar { display: flex; height: 12px; border-radius: 3px; overflow: hidden; margin: 6px 0 4px; }
+  .matrix-wrap { overflow: auto; }
+  table.matrix { border-collapse: collapse; font-size: 11.5px; }
+  table.matrix th { font-weight: 500; color: var(--ink-2); text-align: right; padding: 0 8px 0 0; white-space: nowrap; }
+  table.matrix th.col { writing-mode: vertical-rl; transform: rotate(180deg); text-align: left; padding: 0 0 6px; height: 110px; vertical-align: bottom; }
+  table.matrix td { width: 24px; height: 24px; border: 1px solid var(--line); text-align: center; cursor: pointer; user-select: none; font-size: 13px; }
+  table.matrix td.off { background: var(--surface-2); cursor: default; }
+  table.matrix td.m { background: #1b1b19; color: #fff; }
+  table.matrix td.n { background: #e6e3da; }
+  table.matrix td.a { background: #f6d9d2; color: #a5402d; }
+  #bubbles { touch-action: none; background: #fbfaf7; border-radius: var(--radius-sm); }
+  #bubbles g.node { cursor: grab; }
+</style>
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="../../index.html"><span class="brand-mark"></span>a_tools</a>
+  <span class="crumb">/ <b>Programme &amp; Adjacency</b></span>
+  <span class="spacer"></span>
+  <span class="site-pill" id="sitePill" hidden></span>
+</header>
+
+<main class="tool">
+  <aside class="panel">
+    <h1>Programme &amp; Adjacency</h1>
+    <p class="lead">List the spaces, set which ones belong together, and get the area schedule and a bubble diagram you can drag into shape.</p>
+
+    <div class="group">
+      <p class="group-title"><span class="step">1</span>Start from</p>
+      <div class="field"><select id="template"></select></div>
+      <p class="hint">Templates give typical starting areas. Change anything; your work is kept in this browser.</p>
+    </div>
+
+    <div class="group">
+      <p class="group-title"><span class="step">2</span>Spaces</p>
+      <table class="rooms">
+        <colgroup><col><col style="width:64px"><col style="width:46px"><col style="width:92px"><col style="width:26px"></colgroup>
+        <thead><tr><th>Name</th><th>m²</th><th>No.</th><th>Zone</th><th></th></tr></thead>
+        <tbody id="rooms"></tbody>
+      </table>
+      <button id="add" class="btn block" style="margin-top:8px">+ Add space</button>
+    </div>
+
+    <div class="group">
+      <p class="group-title"><span class="step">3</span>Areas</p>
+      <div class="grid-2">
+        <div class="field"><label for="ntg">Circulation and walls <span class="unit">% of net</span></label><input id="ntg" type="number" min="0" max="100" step="1"></div>
+        <div class="field"><label for="floors">Floors</label><input id="floors" type="number" min="1" max="60" step="1" value="1"></div>
+      </div>
+      <div class="stats">
+        <div class="stat"><b id="sNet">–</b><span>Net area</span></div>
+        <div class="stat"><b id="sGross">–</b><span>Gross area</span></div>
+        <div class="stat"><b id="sPlate">–</b><span>Floor plate</span></div>
+        <div class="stat"><b id="sCount">–</b><span>Spaces</span></div>
+      </div>
+      <div class="bar" id="zoneBar"></div>
+      <div class="legend" id="zoneLegend"></div>
+    </div>
+
+    <div class="group">
+      <div class="row">
+        <button id="csv" class="btn">Schedule · CSV</button>
+        <button id="svg" class="btn">Diagram · SVG</button>
+        <button id="print" class="btn">PDF</button>
+      </div>
+    </div>
+  </aside>
+
+  <section class="canvas">
+    <div class="sheet">
+      <div class="card wide">
+        <h3>Bubble diagram</h3>
+        <p class="sub">Circle size follows area. Black lines must touch, dashed lines should be near, red pairs are pushed apart. Drag circles to arrange them.</p>
+        <svg id="bubbles" viewBox="0 0 1000 620"></svg>
+        <div class="row noprint" style="margin-top:8px;max-width:360px">
+          <button id="relax" class="btn">Re-arrange</button>
+          <button id="shuffle" class="btn">Shuffle</button>
+        </div>
+      </div>
+      <div class="card wide">
+        <h3>Adjacency matrix</h3>
+        <p class="sub">Tap a cell to cycle: <b>●</b> must be adjacent · <b>○</b> should be near · <b style="color:#a5402d">×</b> keep apart · empty = no link</p>
+        <div class="matrix-wrap"><table class="matrix" id="matrix"></table></div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<script src="../../assets/atools.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+const ZONES = {
+  public: { label: 'Public', color: '#c8553d' },
+  shared: { label: 'Shared', color: '#e0a23a' },
+  private: { label: 'Private', color: '#2f5d8a' },
+  work: { label: 'Work / teaching', color: '#5d8a3c' },
+  service: { label: 'Service', color: '#8a8882' }
+};
+// Typical starting areas (m²) for early briefs; links are [a, b, kind] with m = must, n = near, a = apart.
+const TEMPLATES = {
+  house: { name: 'House, 3 bedrooms', ntg: 20, rooms: [
+    ['Entrance', 6, 1, 'public'], ['Living room', 28, 1, 'public'], ['Kitchen', 12, 1, 'shared'], ['Dining', 14, 1, 'shared'],
+    ['Main bedroom', 16, 1, 'private'], ['Bedroom', 12, 2, 'private'], ['Bathroom', 6, 2, 'private'], ['Guest WC', 2.5, 1, 'service'],
+    ['Utility', 5, 1, 'service'], ['Storage', 4, 1, 'service']],
+    links: [['Entrance', 'Living room', 'm'], ['Kitchen', 'Dining', 'm'], ['Dining', 'Living room', 'm'], ['Main bedroom', 'Bathroom', 'm'],
+      ['Bedroom', 'Bathroom', 'n'], ['Entrance', 'Guest WC', 'n'], ['Kitchen', 'Utility', 'm'], ['Living room', 'Bedroom', 'a'], ['Kitchen', 'Main bedroom', 'a']] },
+  school: { name: 'Primary school, 8 classrooms', ntg: 30, rooms: [
+    ['Entrance hall', 40, 1, 'public'], ['Classroom', 60, 8, 'work'], ['Library', 80, 1, 'work'], ['Multi-purpose hall', 200, 1, 'shared'],
+    ['Dining', 120, 1, 'shared'], ['Kitchen', 40, 1, 'service'], ['Head teacher', 18, 1, 'private'], ['Admin office', 25, 1, 'private'],
+    ['Staff room', 40, 1, 'private'], ['Pupil WC', 30, 2, 'service'], ['Storage', 20, 2, 'service'], ['Plant room', 30, 1, 'service']],
+    links: [['Entrance hall', 'Admin office', 'm'], ['Admin office', 'Head teacher', 'm'], ['Entrance hall', 'Multi-purpose hall', 'n'], ['Multi-purpose hall', 'Dining', 'm'],
+      ['Dining', 'Kitchen', 'm'], ['Classroom', 'Pupil WC', 'm'], ['Classroom', 'Library', 'n'], ['Classroom', 'Storage', 'n'], ['Multi-purpose hall', 'Classroom', 'a'],
+      ['Kitchen', 'Classroom', 'a'], ['Staff room', 'Admin office', 'n']] },
+  library: { name: 'Public library', ntg: 25, rooms: [
+    ['Entrance lobby', 60, 1, 'public'], ['Lending desk', 25, 1, 'public'], ['Open stacks', 300, 1, 'work'], ['Reading room', 200, 1, 'work'],
+    ["Children's library", 120, 1, 'work'], ['Study room', 12, 6, 'work'], ['Event room', 100, 1, 'shared'], ['Café', 60, 1, 'shared'],
+    ['Staff office', 40, 1, 'private'], ['Workroom', 50, 1, 'private'], ['WC', 30, 1, 'service'], ['Storage', 40, 1, 'service'], ['Plant room', 40, 1, 'service']],
+    links: [['Entrance lobby', 'Lending desk', 'm'], ['Entrance lobby', 'Café', 'm'], ['Entrance lobby', 'Event room', 'n'], ['Lending desk', 'Open stacks', 'm'],
+      ['Open stacks', 'Reading room', 'm'], ['Reading room', 'Study room', 'n'], ["Children's library", 'Entrance lobby', 'n'], ["Children's library", 'Reading room', 'a'],
+      ['Lending desk', 'Workroom', 'm'], ['Workroom', 'Staff office', 'm'], ['Event room', 'Reading room', 'a'], ['Café', 'Reading room', 'a']] },
+  office: { name: 'Office floor, about 40 desks', ntg: 20, rooms: [
+    ['Reception', 30, 1, 'public'], ['Open office', 400, 1, 'work'], ['Meeting room', 20, 4, 'shared'], ['Focus room', 8, 4, 'work'],
+    ['Kitchen and break', 50, 1, 'shared'], ['WC', 30, 1, 'service'], ['Server room', 12, 1, 'service'], ['Storage', 20, 1, 'service'], ['Plant room', 25, 1, 'service']],
+    links: [['Reception', 'Meeting room', 'm'], ['Open office', 'Focus room', 'm'], ['Open office', 'Kitchen and break', 'n'], ['Open office', 'Meeting room', 'n'],
+      ['Kitchen and break', 'Focus room', 'a'], ['Open office', 'Server room', 'n'], ['Open office', 'WC', 'n']] },
+  housing: { name: 'Student housing cluster, 10 rooms', ntg: 25, rooms: [
+    ['Entrance', 15, 1, 'public'], ['Bedroom', 14, 10, 'private'], ['Shared bathroom', 4, 5, 'private'], ['Kitchen and lounge', 40, 1, 'shared'],
+    ['Laundry', 12, 1, 'service'], ['Bike store', 20, 1, 'service']],
+    links: [['Entrance', 'Kitchen and lounge', 'm'], ['Bedroom', 'Shared bathroom', 'm'], ['Bedroom', 'Kitchen and lounge', 'n'], ['Entrance', 'Bike store', 'm'],
+      ['Kitchen and lounge', 'Laundry', 'n'], ['Kitchen and lounge', 'Bedroom', 'a']] },
+  blank: { name: 'Blank', ntg: 25, rooms: [['Space', 20, 1, 'public']], links: [] }
+};
+
+const KEY = 'atools.programme';
+let P;   // { ntg, floors, rooms: [{ id, name, area, n, zone, x, y }], links: { 'id1|id2': 'm' | 'n' | 'a' } }
+let nextId = 1;
+
+function fromTemplate(k) {
+  const t = TEMPLATES[k], byName = {};
+  const rooms = t.rooms.map(([name, area, n, zone]) => (byName[name] = { id: nextId++, name, area, n, zone }));
+  const links = {};
+  t.links.forEach(([a, b, kind]) => { if (byName[a] && byName[b]) links[pair(byName[a].id, byName[b].id)] = kind; });
+  return { template: k, ntg: t.ntg, floors: 1, rooms, links };
+}
+const pair = (a, b) => a < b ? `${a}|${b}` : `${b}|${a}`;
+function save() { try { localStorage.setItem(KEY, JSON.stringify(P)); } catch {} }
+function load() {
+  try { const s = JSON.parse(localStorage.getItem(KEY)); if (s && s.rooms) { P = s; nextId = Math.max(0, ...s.rooms.map(r => r.id)) + 1; return; } } catch {}
+  P = fromTemplate('library');
+}
+
+// ---------- Panel ----------
+Object.entries(TEMPLATES).forEach(([k, t]) => $('template').add(new Option(t.name, k)));
+$('template').onchange = () => {
+  if (!confirm('Replace your current list with this template?')) { $('template').value = P.template || 'blank'; return; }
+  P = fromTemplate($('template').value); renderAll(true);
+};
+function renderRooms() {
+  $('rooms').innerHTML = P.rooms.map(r => `<tr data-id="${r.id}">
+    <td><input data-k="name" value="${r.name.replace(/"/g, '&quot;')}"></td>
+    <td class="num"><input data-k="area" type="number" min="1" step="0.5" value="${r.area}"></td>
+    <td class="num"><input data-k="n" type="number" min="1" step="1" value="${r.n}"></td>
+    <td><select data-k="zone">${Object.entries(ZONES).map(([k, z]) => `<option value="${k}"${k === r.zone ? ' selected' : ''}>${z.label}</option>`).join('')}</select></td>
+    <td><button class="x" title="Remove">×</button></td></tr>`).join('');
+}
+$('rooms').addEventListener('input', e => {
+  const tr = e.target.closest('tr'), r = P.rooms.find(x => x.id === +tr.dataset.id), k = e.target.dataset.k;
+  if (!r || !k) return;
+  r[k] = k === 'name' || k === 'zone' ? e.target.value : Math.max(k === 'n' ? 1 : 0.5, +e.target.value || 0);
+  save(); renderTotals(); renderMatrix(); layout.update();
+});
+$('rooms').addEventListener('click', e => {
+  if (!e.target.classList.contains('x')) return;
+  const id = +e.target.closest('tr').dataset.id;
+  P.rooms = P.rooms.filter(r => r.id !== id);
+  Object.keys(P.links).forEach(k => { if (k.split('|').map(Number).includes(id)) delete P.links[k]; });
+  renderAll();
+});
+$('add').onclick = () => { P.rooms.push({ id: nextId++, name: 'New space', area: 20, n: 1, zone: 'shared' }); renderAll(); };
+['ntg', 'floors'].forEach(id => $(id).addEventListener('input', () => { P[id] = +$(id).value || 0; save(); renderTotals(); }));
+
+const fmt = x => Math.round(x).toLocaleString('en-US');
+function renderTotals() {
+  const net = P.rooms.reduce((s, r) => s + r.area * r.n, 0), gross = net * (1 + (P.ntg || 0) / 100), floors = Math.max(1, P.floors || 1);
+  $('sNet').textContent = fmt(net) + ' m²'; $('sGross').textContent = fmt(gross) + ' m²';
+  $('sPlate').textContent = fmt(gross / floors) + ' m²'; $('sCount').textContent = P.rooms.reduce((s, r) => s + r.n, 0);
+  const byZone = Object.keys(ZONES).map(k => [k, P.rooms.filter(r => r.zone === k).reduce((s, r) => s + r.area * r.n, 0)]).filter(z => z[1]);
+  $('zoneBar').innerHTML = byZone.map(([k, a]) => `<div style="flex:${a};background:${ZONES[k].color}" title="${ZONES[k].label}"></div>`).join('');
+  $('zoneLegend').innerHTML = byZone.map(([k, a]) => `<span><i style="background:${ZONES[k].color}"></i>${ZONES[k].label} ${Math.round(100 * a / net)}%</span>`).join('');
+}
+
+// ---------- Matrix ----------
+const NEXT = { undefined: 'm', m: 'n', n: 'a', a: undefined }, SYM = { m: '●', n: '○', a: '×' };
+function renderMatrix() {
+  const rs = P.rooms;
+  let h = `<tr><th></th>${rs.map(r => `<th class="col">${esc(r.name)}</th>`).join('')}</tr>`;
+  rs.forEach((a, i) => {
+    h += `<tr><th>${esc(a.name)}${a.n > 1 ? ' ×' + a.n : ''}</th>`;
+    rs.forEach((b, j) => {
+      if (j <= i) { h += '<td class="off"></td>'; return; }
+      const k = P.links[pair(a.id, b.id)];
+      h += `<td data-p="${pair(a.id, b.id)}" class="${k || ''}">${k ? SYM[k] : ''}</td>`;
+    });
+    h += '</tr>';
+  });
+  $('matrix').innerHTML = h;
+}
+$('matrix').addEventListener('click', e => {
+  const p = e.target.dataset && e.target.dataset.p; if (!p) return;
+  const k = NEXT[P.links[p]];
+  if (k) P.links[p] = k; else delete P.links[p];
+  save(); renderMatrix(); layout.update(true);
+});
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+// ---------- Bubble diagram: small force layout ----------
+const W = 1000, H = 620;
+const layout = (() => {
+  let scale = 1, drag = null;
+  const radius = r => Math.sqrt(r.area * r.n / Math.PI) * scale;
+  function fit() {
+    const total = P.rooms.reduce((s, r) => s + r.area * r.n, 0) || 1;
+    scale = Math.sqrt(0.2 * W * H / total);   // circles fill about a fifth of the frame
+  }
+  function seed(all) {
+    P.rooms.forEach((r, i) => {
+      if (!all && r.x != null) return;
+      const a = i / P.rooms.length * 2 * Math.PI;
+      r.x = W / 2 + Math.cos(a) * 220 + Math.random() * 20; r.y = H / 2 + Math.sin(a) * 160 + Math.random() * 20;
+    });
+  }
+  function step(alpha) {
+    const rs = P.rooms, byId = Object.fromEntries(rs.map(r => [r.id, r]));
+    rs.forEach(r => { r.vx = (W / 2 - r.x) * 0.004 * alpha; r.vy = (H / 2 - r.y) * 0.006 * alpha; });
+    Object.entries(P.links).forEach(([k, kind]) => {
+      const [a, b] = k.split('|').map(id => byId[id]); if (!a || !b) return;
+      const dx = b.x - a.x, dy = b.y - a.y, d = Math.hypot(dx, dy) || 1, ra = radius(a), rb = radius(b);
+      let f = 0;
+      if (kind === 'm') f = (d - (ra + rb + 4)) * 0.06;
+      else if (kind === 'n') f = Math.max(0, d - (ra + rb + 40)) * 0.02;
+      else if (kind === 'a' && d < ra + rb + 160) f = (d - (ra + rb + 160)) * 0.03;
+      const fx = dx / d * f * alpha, fy = dy / d * f * alpha;
+      a.vx += fx; a.vy += fy; b.vx -= fx; b.vy -= fy;
+    });
+    for (let i = 0; i < rs.length; i++) for (let j = i + 1; j < rs.length; j++) {   // no overlaps
+      const a = rs[i], b = rs[j], dx = b.x - a.x, dy = b.y - a.y, d = Math.hypot(dx, dy) || 0.01, min = radius(a) + radius(b) + 3;
+      if (d < min) { const f = (min - d) / d * 0.5; a.vx -= dx * f; a.vy -= dy * f; b.vx += dx * f; b.vy += dy * f; }
+    }
+    rs.forEach(r => {
+      if (drag && drag.r === r) return;
+      const rr = radius(r);
+      r.x = Math.min(W - rr - 4, Math.max(rr + 4, r.x + r.vx)); r.y = Math.min(H - rr - 4, Math.max(rr + 4, r.y + r.vy));
+    });
+  }
+  function relax(n = 400) { for (let i = 0; i < n; i++) step(1 - i / n * 0.7); }
+  function draw() {
+    const byId = Object.fromEntries(P.rooms.map(r => [r.id, r]));
+    let s = `<rect width="${W}" height="${H}" fill="#fbfaf7"/>`;
+    Object.entries(P.links).forEach(([k, kind]) => {
+      const [a, b] = k.split('|').map(id => byId[id]); if (!a || !b) return;
+      const st = kind === 'm' ? 'stroke="#1b1b19" stroke-width="2.5"' : kind === 'n' ? 'stroke="#4a4945" stroke-width="1.3" stroke-dasharray="6 5"' : 'stroke="#c0392b" stroke-width="1" stroke-dasharray="2 4" opacity=".7"';
+      s += `<line x1="${a.x.toFixed(1)}" y1="${a.y.toFixed(1)}" x2="${b.x.toFixed(1)}" y2="${b.y.toFixed(1)}" ${st}/>`;
+    });
+    P.rooms.forEach(r => {
+      const rr = radius(r), z = ZONES[r.zone] || ZONES.shared, fs = Math.max(10, Math.min(15, rr / 3.2));
+      s += `<g class="node" data-id="${r.id}" transform="translate(${r.x.toFixed(1)} ${r.y.toFixed(1)})">` +
+        `<circle r="${rr.toFixed(1)}" fill="${z.color}" fill-opacity=".22" stroke="${z.color}" stroke-width="2"/>` +
+        `<text text-anchor="middle" y="${-fs * 0.1}" font-size="${fs}" font-family="Inter, sans-serif" font-weight="600" fill="#1b1b19">${esc(r.name)}</text>` +
+        `<text text-anchor="middle" y="${fs * 1.1}" font-size="${fs * 0.82}" font-family="Inter, sans-serif" fill="#4a4945">${fmt(r.area * r.n)} m²${r.n > 1 ? ' · ' + r.n + ' × ' + r.area : ''}</text></g>`;
+    });
+    s += `<text x="${W - 12}" y="${H - 12}" text-anchor="end" font-size="11" font-family="Inter, sans-serif" fill="#8a8882">Circle area ∝ floor area · a_tools</text>`;
+    $('bubbles').innerHTML = s;
+  }
+  function update(rerelax) { fit(); seed(false); if (rerelax) relax(150); draw(); save(); }
+  // Dragging
+  const svg = $('bubbles');
+  const pt = e => { const b = svg.getBoundingClientRect(); return [(e.clientX - b.left) / b.width * W, (e.clientY - b.top) / b.height * H]; };
+  svg.addEventListener('pointerdown', e => {
+    const g = e.target.closest('g.node'); if (!g) return;
+    const r = P.rooms.find(x => x.id === +g.dataset.id), [x, y] = pt(e);
+    drag = { r, dx: r.x - x, dy: r.y - y }; svg.setPointerCapture(e.pointerId);
+  });
+  svg.addEventListener('pointermove', e => {
+    if (!drag) return;
+    const [x, y] = pt(e); drag.r.x = x + drag.dx; drag.r.y = y + drag.dy;
+    for (let i = 0; i < 3; i++) step(0.3);
+    draw();
+  });
+  svg.addEventListener('pointerup', () => { if (drag) { drag = null; save(); } });
+  return { fit, seed, relax, draw, update };
+})();
+
+function renderAll(reseed) {
+  $('template').value = P.template || 'blank';
+  $('ntg').value = P.ntg; $('floors').value = P.floors || 1;
+  renderRooms(); renderTotals(); renderMatrix();
+  layout.fit(); layout.seed(!!reseed); if (reseed || P.rooms.some(r => r.vx == null)) layout.relax(); layout.draw(); save();
+}
+$('relax').onclick = () => { layout.fit(); layout.relax(); layout.draw(); save(); };
+$('shuffle').onclick = () => { layout.fit(); layout.seed(true); layout.relax(); layout.draw(); save(); };
+
+// ---------- Export ----------
+$('csv').onclick = () => {
+  const rows = [['Space', 'Zone', 'Area m2', 'Number', 'Total m2']];
+  P.rooms.forEach(r => rows.push([r.name, (ZONES[r.zone] || {}).label || r.zone, r.area, r.n, r.area * r.n]));
+  const net = P.rooms.reduce((s, r) => s + r.area * r.n, 0);
+  rows.push([], ['Net area', '', '', '', Math.round(net)], [`Circulation and walls (${P.ntg}%)`, '', '', '', Math.round(net * P.ntg / 100)],
+    ['Gross area', '', '', '', Math.round(net * (1 + P.ntg / 100))]);
+  const q = v => /[",\n]/.test(String(v)) ? `"${String(v).replace(/"/g, '""')}"` : v;
+  ATools.download('programme.csv', rows.map(r => r.map(q).join(',')).join('\n') + '\n', 'text/csv');
+};
+$('svg').onclick = () => ATools.downloadSvg($('bubbles'), 'bubble-diagram.svg');
+$('print').onclick = () => window.print();
+
+load();
+renderAll();
+</script>
+</body>
+</html>

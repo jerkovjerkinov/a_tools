@@ -15,6 +15,7 @@ Free, browser-based design tools for architects and architecture students.
 | Site Analysis Sheet | Prototype | [`tools/site-sheet/`](tools/site-sheet/index.html) |
 | 3D Context | Prototype | [`tools/context-3d/`](tools/context-3d/index.html) |
 | Sun Hours | Prototype | [`tools/sun-hours/`](tools/sun-hours/index.html) |
+| Programme & Adjacency | Prototype | [`tools/programme/`](tools/programme/index.html) |
 
 ### Sun & Shadow Study
 
@@ -52,7 +53,11 @@ OSM buildings (heights from `height`, `building:levels` or an editable default; 
 
 ### Sun Hours
 
-Hours of direct sun on the ground (1 m grid, sun every 10 minutes) for any day, in a 150, 200 or 300 m square. Shadows come from OSM buildings up to 120 m outside the square and from an optional footprint you draw. Reports mean sun on open ground, the share with 2 h or more (the BRE 20 March test) and the share in shade all day. Shadows are rasterised on a canvas, one pass per sun position.
+Hours of direct sun on the ground (1 m grid, sun every 10 minutes) for any day, in a 150, 200 or 300 m square. Shadows come from OSM buildings up to 120 m outside the square and from an optional footprint you draw. Reports mean sun on open ground, the share in shade all day, and a pass / fail check against a sunlight rule (UK BRE preset: 2 h on 50% of open ground on 20 March, or custom numbers). Shadows are rasterised on a canvas, one pass per sun position.
+
+### Programme & Adjacency
+
+An editable space list (area, number, zone) from templates (house, primary school, library, office floor, student housing), net / gross / floor-plate totals, an adjacency matrix (must / near / apart) and a force-laid bubble diagram with circle area proportional to floor area. Draggable; kept in the browser; CSV schedule and SVG diagram export.
 
 All tools share `assets/atools.css` and `assets/atools.js`. Calculations used by more than one tool live in `assets/lib/`: `sun.js` (sun position, sun path), `climate.js` (Open-Meteo download, climate summary, charts, design notes) and `fabric.js` (OSM buildings, figure-ground drawing, building masses with heights). Also, the site set on the hub (or in any tool) is stored in the browser and reused by the others.
 
