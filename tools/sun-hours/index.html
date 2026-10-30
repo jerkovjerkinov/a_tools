@@ -72,10 +72,23 @@
       <div class="stats">
         <div class="stat"><b id="sDay">–</b><span>Daylight that day</span></div>
         <div class="stat"><b id="sMean">–</b><span>Mean sun on open ground</span></div>
-        <div class="stat"><b id="s2h">–</b><span>Open ground with 2 h+ sun</span></div>
+        <div class="stat"><b id="s2h">–</b><span id="s2hL">Open ground with 2 h+ sun</span></div>
         <div class="stat"><b id="s0h">–</b><span>Open ground in shade all day</span></div>
+        <div class="stat hero" id="ruleBox"><b id="sRule">–</b><span id="sRuleL">Rule check</span></div>
       </div>
-      <p class="hint">A common daylight rule (UK BRE guide) asks that at least half of a garden or open space gets 2 hours of sun on 20 March.</p>
+    </div>
+
+    <div class="group">
+      <p class="group-title">Sunlight rule</p>
+      <div class="chips" id="rules">
+        <button class="chip on" data-h="2" data-p="50" data-d="03-20">UK BRE</button>
+        <button class="chip" data-custom="1">Custom</button>
+      </div>
+      <div class="grid-2">
+        <div class="field"><label for="ruleH">At least <span class="unit">hours of sun</span></label><input id="ruleH" type="number" min="0.5" max="12" step="0.5" value="2"></div>
+        <div class="field"><label for="ruleP">On at least <span class="unit">% of open ground</span></label><input id="ruleP" type="number" min="1" max="100" step="5" value="50"></div>
+      </div>
+      <p class="hint" id="ruleHint">UK BRE guide: at least half of a garden or open space should get 2 hours of sun on 20 March. Set your own numbers for local rules.</p>
     </div>
 
     <div class="group">
@@ -168,12 +181,20 @@ function preset(d) {
 document.querySelectorAll('#presets .chip').forEach(c => c.onclick = () => preset(c.dataset.d));
 $('date').addEventListener('change', () => document.querySelectorAll('#presets .chip').forEach(c => c.classList.toggle('on', $('date').value.slice(5) === c.dataset.d)));
 preset('03-20');
+document.querySelectorAll('#rules .chip').forEach(c => c.onclick = () => {
+  document.querySelectorAll('#rules .chip').forEach(x => x.classList.toggle('on', x === c));
+  if (c.dataset.custom) { $('ruleH').focus(); return; }
+  $('ruleH').value = c.dataset.h; $('ruleP').value = c.dataset.p; preset(c.dataset.d);
+});
+['ruleH', 'ruleP'].forEach(id => $(id).addEventListener('input', () =>
+  document.querySelectorAll('#rules .chip').forEach(x => x.classList.toggle('on', !!x.dataset.custom))));
 
 // ---------- Calculation ----------
 function clearResult() {
   if (overlay) { map.removeLayer(overlay); overlay = null; }
   bLayer.clearLayers(); $('legend').hidden = true; $('png').disabled = true;
-  ['sDay', 'sMean', 's2h', 's0h'].forEach(id => $(id).textContent = '–');
+  ['sDay', 'sMean', 's2h', 's0h', 'sRule'].forEach(id => $(id).textContent = '–');
+  $('ruleBox').style.background = '';
 }
 
 // Sun positions every STEP minutes across the local solar day, above the horizon only.
@@ -243,6 +264,7 @@ async function run() {
   // Colour the result and collect statistics over open ground.
   const dayH = steps.length * hoursPerStep, img = ctx.createImageData(N, N);
   const stops = [[38, 52, 79], [47, 93, 138], [159, 188, 214], [243, 210, 122], [224, 162, 58]];
+  const ruleH = +$('ruleH').value || 2, ruleP = +$('ruleP').value || 50;
   let open = 0, total = 0, two = 0, zero = 0;
   for (let i = 0; i < N * N; i++) {
     const o = i * 4;
@@ -251,7 +273,7 @@ async function run() {
     const f = t * (stops.length - 1), a = Math.min(stops.length - 2, Math.floor(f)), w = f - a;
     for (let c = 0; c < 3; c++) img.data[o + c] = stops[a][c] + (stops[a + 1][c] - stops[a][c]) * w;
     img.data[o + 3] = 215;
-    open++; total += hrs; if (hrs >= 2) two++; if (hrs < hoursPerStep / 2) zero++;
+    open++; total += hrs; if (hrs >= ruleH - 1e-9) two++; if (hrs < hoursPerStep / 2) zero++;
   }
   ctx.putImageData(img, 0, 0);
   masses.forEach(m => { ctx.fillStyle = m.own ? '#c8553d' : '#4a4945'; fillPoly([m.outer, ...m.holes], 0, 0); });
@@ -270,6 +292,11 @@ async function run() {
   $('sDay').textContent = f1(dayH) + ' h';
   $('sMean').textContent = open ? f1(total / open) + ' h' : '–';
   $('s2h').textContent = open ? Math.round(100 * two / open) + '%' : '–';
+  $('s2hL').textContent = `Open ground with ${ruleH} h+ sun`;
+  const pass = open && 100 * two / open >= ruleP;
+  $('sRule').textContent = !open ? '–' : pass ? 'Passes' : 'Fails';
+  $('sRuleL').textContent = `${ruleP}% of open ground needs ${ruleH} h of sun on ${date}`;
+  $('ruleBox').style.background = !open ? '' : pass ? '#3f6b26' : '#a5402d';
   $('s0h').textContent = open ? Math.round(100 * zero / open) + '%' : '–';
   $('lMid').textContent = f1(dayH / 2) + ' h'; $('lMax').textContent = f1(dayH) + ' h';
   $('legend').hidden = false; $('png').disabled = false;
@@ -279,7 +306,26 @@ async function run() {
 }
 
 $('run').onclick = run;
-$('png').onclick = () => { const a = document.createElement('a'); a.href = lastPng; a.download = `sun-hours-${$('date').value}.png`; a.click(); };
+// PNG: the heatmap enlarged, with a caption, colour scale and data credit.
+$('png').onclick = () => {
+  const img = new Image();
+  img.onload = () => {
+    const S = 1200, foot = 90, c = document.createElement('canvas'); c.width = S; c.height = S + foot;
+    const g = c.getContext('2d');
+    g.fillStyle = '#fff'; g.fillRect(0, 0, S, S + foot);
+    g.imageSmoothingEnabled = false; g.drawImage(img, 0, 0, S, S);
+    const grad = g.createLinearGradient(24, 0, 324, 0);
+    ['#26344f', '#2f5d8a', '#9fbcd6', '#f3d27a', '#e0a23a'].forEach((col, i) => grad.addColorStop(i / 4, col));
+    g.fillStyle = grad; g.fillRect(24, S + 20, 300, 12);
+    g.fillStyle = '#1b1b19'; g.font = '600 18px Inter, sans-serif';
+    g.fillText(`Hours of direct sun · ${$('date').value} · ${site.name || site.lat.toFixed(4) + ', ' + site.lng.toFixed(4)}`, 350, S + 32);
+    g.font = '14px Inter, sans-serif'; g.fillStyle = '#4a4945';
+    g.fillText(`0 h`, 24, S + 52); g.textAlign = 'right'; g.fillText($('lMax').textContent, 324, S + 52); g.textAlign = 'left';
+    g.fillText(`${2 * R} m square, north up · Buildings © OpenStreetMap contributors · a_tools`, 350, S + 58);
+    const a = document.createElement('a'); a.href = c.toDataURL('image/png'); a.download = `sun-hours-${$('date').value}.png`; a.click();
+  };
+  img.src = lastPng;
+};
 $('print').onclick = () => window.print();
 </script>
 </body>

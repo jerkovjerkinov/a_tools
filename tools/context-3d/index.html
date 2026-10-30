@@ -296,7 +296,7 @@ function exportObj() {
   ATools.download(fileBase() + '.obj', out.join('\n') + '\n', 'text/plain');
 }
 function exportDxf() {
-  const o = ['0', 'SECTION', '2', 'ENTITIES'];
+  const o = ['999', 'a_tools 3D context, metres, origin at site, north +Y. Buildings (c) OpenStreetMap contributors; terrain Copernicus DEM via Open-Meteo.', '0', 'SECTION', '2', 'ENTITIES'];
   allTris().forEach(p => p.tris.forEach(t => {
     o.push('0', '3DFACE', '8', p.layer);
     [...t, t[2]].forEach(([x, y, z], i) => o.push(String(10 + i), f3(x), String(20 + i), f3(y), String(30 + i), f3(z)));
@@ -312,7 +312,7 @@ function exportDxf() {
 function exportStl() {
   const tris = allTris().flatMap(p => p.tris);
   const buf = new ArrayBuffer(84 + tris.length * 50), dv = new DataView(buf);
-  const head = 'a_tools 3D context, metres, Z up';
+  const head = 'a_tools 3D context, metres, Z up, (c) OpenStreetMap contributors';
   for (let i = 0; i < head.length; i++) dv.setUint8(i, head.charCodeAt(i));
   dv.setUint32(80, tris.length, true);
   tris.forEach((t, i) => {

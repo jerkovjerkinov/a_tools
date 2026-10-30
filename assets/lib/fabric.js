@@ -61,7 +61,8 @@ function svg(geo, { style = 'figure', roads = true, water = true, green = true, 
   const bar = R >= 1000 ? 500 : R >= 500 ? 200 : 100, bw = bar * S, ink = inv ? '#fff' : '#111';
   s += `<g font-family="Inter, sans-serif" fill="${ink}"><rect x="30" y="952" width="${bw}" height="6" fill="${ink}"/><rect x="${30 + bw / 2}" y="952" width="${bw / 2}" height="6" fill="${bg}" stroke="${ink}" stroke-width="1"/>` +
        `<text x="30" y="944" font-size="14">0</text><text x="${30 + bw}" y="944" font-size="14" text-anchor="end">${bar} m</text>` +
-       `<path d="M960 30 L972 66 L960 58 L948 66 Z" fill="${ink}"/><text x="960" y="86" font-size="14" text-anchor="middle" font-weight="600">N</text></g>`;
+       `<path d="M960 30 L972 66 L960 58 L948 66 Z" fill="${ink}"/><text x="960" y="86" font-size="14" text-anchor="middle" font-weight="600">N</text>` +
+       `<text x="970" y="958" font-size="11" text-anchor="end" opacity=".7">© OpenStreetMap contributors</text></g>`;
   return s;
 }
 
