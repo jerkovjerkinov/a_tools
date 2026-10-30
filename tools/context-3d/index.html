@@ -94,6 +94,7 @@
 <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/earcut@2.2.4/dist/earcut.min.js"></script>
 <script src="../../assets/atools.js"></script>
+<script src="../../assets/lib/fabric.js"></script>
 <script>
 const $ = id => document.getElementById(id);
 const rad = Math.PI / 180;
@@ -132,32 +133,7 @@ document.querySelectorAll('#views .chip').forEach(c => c.onclick = () => {
 });
 
 // ---------- Data ----------
-const xy = (lat, lng, o) => [(lng - o.lng) * 111320 * Math.cos(o.lat * rad), (lat - o.lat) * 110540];
-const num = v => { const n = parseFloat(String(v || '').replace(',', '.')); return isFinite(n) ? n : null; };
-function signedArea(r) { let a = 0; for (let i = 0; i < r.length; i++) { const p = r[i], q = r[(i + 1) % r.length]; a += p[0] * q[1] - q[0] * p[1]; } return a / 2; }
-// Drop the closing duplicate point and orient: outer rings counter-clockwise, holes clockwise.
-function clean(r, ccw) {
-  r = r.slice(); if (r.length > 1 && r[0][0] === r[r.length - 1][0] && r[0][1] === r[r.length - 1][1]) r.pop();
-  if ((signedArea(r) > 0) !== ccw) r.reverse();
-  return r;
-}
-function inside(p, r) {
-  let c = false;
-  for (let i = 0, j = r.length - 1; i < r.length; j = i++)
-    if ((r[i][1] > p[1]) !== (r[j][1] > p[1]) && p[0] < (r[j][0] - r[i][0]) * (p[1] - r[i][1]) / (r[j][1] - r[i][1]) + r[i][0]) c = !c;
-  return c;
-}
-
-async function fetchOsm(o) {
-  const dLat = R / 110540, dLng = R / (111320 * Math.cos(o.lat * rad));
-  const bb = [o.lat - dLat, o.lng - dLng, o.lat + dLat, o.lng + dLng].map(x => x.toFixed(6)).join(',');
-  const q = `[out:json][timeout:60][bbox:${bb}];
-    (way["building"];relation["building"]["type"="multipolygon"];); out geom;
-    ${$('oRoads').checked ? 'way["highway"]["highway"!~"^(proposed|construction|platform|corridor|elevator|steps)$"]; out geom;' : ''}`;
-  const r = await fetch('https://overpass-api.de/api/interpreter', { method: 'POST', body: 'data=' + encodeURIComponent(q) });
-  if (!r.ok) throw new Error(r.status);
-  return r.json();
-}
+const fetchOsm = o => ATFabric.fetchMasses(o, R, { roads: $('oRoads').checked });
 
 // 10 × 10 elevation grid (one Open-Meteo request), heights relative to the site point.
 const GRID = 10;
@@ -184,45 +160,9 @@ function groundAt(T, x, y) {
   return E(i, j) * (1 - fx) * (1 - fy) + E(i + 1, j) * fx * (1 - fy) + E(i, j + 1) * (1 - fx) * fy + E(i + 1, j + 1) * fx * fy - T.base;
 }
 
-function osmHeight(t, defH, floorH) {
-  const h = num(t.height);
-  if (h) return { h, known: true };
-  const lv = num(t['building:levels']);
-  if (lv) return { h: (lv + (num(t['roof:levels']) || 0)) * floorH, known: true };
-  return { h: defH, known: false };
-}
-
 function buildModel(j, T) {
-  const defH = +$('defH').value || 9, floorH = +$('floorH').value || 3;
-  const buildings = [], streets = [];
-  const inBox = r => r.some(([x, y]) => Math.abs(x) <= R && Math.abs(y) <= R);
-  j.elements.forEach(el => {
-    const t = el.tags || {};
-    if (t.highway) {
-      if (el.geometry) streets.push(el.geometry.map(g => xy(g.lat, g.lon, site)));
-      return;
-    }
-    if (!t.building) return;
-    let polys = [];
-    if (el.type === 'way' && el.geometry && el.geometry.length > 3) polys = [{ outer: el.geometry.map(g => xy(g.lat, g.lon, site)), holes: [] }];
-    else if (el.type === 'relation') {
-      const ms = (el.members || []).filter(m => m.geometry && m.geometry.length > 3);
-      polys = ms.filter(m => m.role !== 'inner').map(m => ({ outer: m.geometry.map(g => xy(g.lat, g.lon, site)), holes: [] }));
-      ms.filter(m => m.role === 'inner').forEach(m => {
-        const hole = m.geometry.map(g => xy(g.lat, g.lon, site)), p = polys.find(p => inside(hole[0], p.outer));
-        if (p) p.holes.push(hole);
-      });
-    }
-    const { h, known } = osmHeight(t, defH, floorH);
-    const minH = num(t.min_height) || 0;
-    polys.forEach(p => {
-      const outer = clean(p.outer, true);
-      if (outer.length < 3 || !inBox(outer) || Math.abs(signedArea(outer)) < 2) return;
-      const holes = p.holes.map(hh => clean(hh, false)).filter(hh => hh.length >= 3);
-      const z0 = Math.min(...outer.map(([x, y]) => groundAt(T, x, y)));
-      buildings.push({ outer, holes, z0: z0 + minH, z1: z0 + Math.max(h, minH + 1), known, tags: t });
-    });
-  });
+  const buildings = ATFabric.masses(j, site, R, { defH: +$('defH').value || 9, floorH: +$('floorH').value || 3, ground: (x, y) => groundAt(T, x, y) });
+  const streets = j.elements.filter(el => el.tags && el.tags.highway && el.geometry).map(el => el.geometry.map(g => ATFabric.xy(g.lat, g.lon, site)));
   return { buildings, streets, T };
 }
 

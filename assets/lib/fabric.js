@@ -73,5 +73,71 @@ function stats(geo) {
     grain: !median ? '–' : median < 150 ? 'Fine' : median < 600 ? 'Medium' : 'Coarse' };
 }
 
-window.ATFabric = { load, parse, svg, stats, area };
+// ---------- Building masses (footprint + height) for 3D and shadow tools ----------
+const xy = (lat, lng, o) => [(lng - o.lng) * 111320 * Math.cos(o.lat * rad), (lat - o.lat) * 110540];
+const num = v => { const n = parseFloat(String(v || '').replace(',', '.')); return isFinite(n) ? n : null; };
+function signedArea(r) { let a = 0; for (let i = 0; i < r.length; i++) { const p = r[i], q = r[(i + 1) % r.length]; a += p[0] * q[1] - q[0] * p[1]; } return a / 2; }
+// Drop the closing duplicate point and orient: outer rings counter-clockwise, holes clockwise.
+function clean(r, ccw) {
+  r = r.slice(); if (r.length > 1 && r[0][0] === r[r.length - 1][0] && r[0][1] === r[r.length - 1][1]) r.pop();
+  if ((signedArea(r) > 0) !== ccw) r.reverse();
+  return r;
+}
+function inside(p, r) {
+  let c = false;
+  for (let i = 0, j = r.length - 1; i < r.length; j = i++)
+    if ((r[i][1] > p[1]) !== (r[j][1] > p[1]) && p[0] < (r[j][0] - r[i][0]) * (p[1] - r[i][1]) / (r[j][1] - r[i][1]) + r[i][0]) c = !c;
+  return c;
+}
+function osmHeight(t, defH, floorH) {
+  const h = num(t.height);
+  if (h) return { h, known: true };
+  const lv = num(t['building:levels']);
+  if (lv) return { h: (lv + (num(t['roof:levels']) || 0)) * floorH, known: true };
+  return { h: defH, known: false };
+}
+
+// Buildings (and optionally streets) with tags, in a square of half-size R metres.
+async function fetchMasses(site, R, { roads = false } = {}) {
+  const dLat = R / 110540, dLng = R / (111320 * Math.cos(site.lat * rad));
+  const bb = [site.lat - dLat, site.lng - dLng, site.lat + dLat, site.lng + dLng].map(x => x.toFixed(6)).join(',');
+  const q = `[out:json][timeout:60][bbox:${bb}];
+    (way["building"];relation["building"]["type"="multipolygon"];); out geom;
+    ${roads ? 'way["highway"]["highway"!~"^(proposed|construction|platform|corridor|elevator|steps)$"]; out geom;' : ''}`;
+  const r = await fetch('https://overpass-api.de/api/interpreter', { method: 'POST', body: 'data=' + encodeURIComponent(q) });
+  if (!r.ok) throw new Error(r.status);
+  return r.json();
+}
+
+// Overpass JSON → [{ outer, holes, z0, z1, known }] in local metres; ground(x, y) gives the terrain height.
+function masses(j, site, R, { defH = 9, floorH = 3, ground = () => 0 } = {}) {
+  const out = [], P = g => xy(g.lat, g.lon, site);
+  const inBox = r => r.some(([x, y]) => Math.abs(x) <= R && Math.abs(y) <= R);
+  j.elements.forEach(el => {
+    const t = el.tags || {};
+    if (!t.building) return;
+    let polys = [];
+    if (el.type === 'way' && el.geometry && el.geometry.length > 3) polys = [{ outer: el.geometry.map(P), holes: [] }];
+    else if (el.type === 'relation') {
+      const ms = (el.members || []).filter(m => m.geometry && m.geometry.length > 3);
+      polys = ms.filter(m => m.role !== 'inner').map(m => ({ outer: m.geometry.map(P), holes: [] }));
+      ms.filter(m => m.role === 'inner').forEach(m => {
+        const hole = m.geometry.map(P), p = polys.find(p => inside(hole[0], p.outer));
+        if (p) p.holes.push(hole);
+      });
+    }
+    const { h, known } = osmHeight(t, defH, floorH);
+    const minH = num(t.min_height) || 0;
+    polys.forEach(p => {
+      const outer = clean(p.outer, true);
+      if (outer.length < 3 || !inBox(outer) || Math.abs(signedArea(outer)) < 2) return;
+      const holes = p.holes.map(hh => clean(hh, false)).filter(hh => hh.length >= 3);
+      const z0 = Math.min(...outer.map(([x, y]) => ground(x, y)));
+      out.push({ outer, holes, z0: z0 + minH, z1: z0 + Math.max(h, minH + 1), known, tags: t });
+    });
+  });
+  return out;
+}
+
+window.ATFabric = { load, parse, svg, stats, area, xy, signedArea, clean, inside, osmHeight, fetchMasses, masses };
 })();

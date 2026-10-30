@@ -14,6 +14,7 @@ Free, browser-based design tools for architects and architecture students.
 | Walkability | Prototype | [`tools/walkability/`](tools/walkability/index.html) |
 | Site Analysis Sheet | Prototype | [`tools/site-sheet/`](tools/site-sheet/index.html) |
 | 3D Context | Prototype | [`tools/context-3d/`](tools/context-3d/index.html) |
+| Sun Hours | Prototype | [`tools/sun-hours/`](tools/sun-hours/index.html) |
 
 ### Sun & Shadow Study
 
@@ -49,7 +50,11 @@ One A3 landscape board for the site: figure-ground, sun path, wind rose, tempera
 
 OSM buildings (heights from `height`, `building:levels` or an editable default; courtyards kept) and an optional 10 × 10 Copernicus DEM elevation grid from Open-Meteo, previewed as an axonometric from four directions and exported as closed solids in OBJ (Y up), DXF (3DFACE on Buildings / Terrain / Streets layers) or binary STL. Metres, origin at the site point. Roofs are flat. Uses [earcut](https://github.com/mapbox/earcut) for roof triangulation.
 
-All tools share `assets/atools.css` and `assets/atools.js`. Calculations used by more than one tool live in `assets/lib/`: `sun.js` (sun position, sun path), `climate.js` (Open-Meteo download, climate summary, charts, design notes) and `fabric.js` (OSM buildings, figure-ground drawing). Also, the site set on the hub (or in any tool) is stored in the browser and reused by the others.
+### Sun Hours
+
+Hours of direct sun on the ground (1 m grid, sun every 10 minutes) for any day, in a 150, 200 or 300 m square. Shadows come from OSM buildings up to 120 m outside the square and from an optional footprint you draw. Reports mean sun on open ground, the share with 2 h or more (the BRE 20 March test) and the share in shade all day. Shadows are rasterised on a canvas, one pass per sun position.
+
+All tools share `assets/atools.css` and `assets/atools.js`. Calculations used by more than one tool live in `assets/lib/`: `sun.js` (sun position, sun path), `climate.js` (Open-Meteo download, climate summary, charts, design notes) and `fabric.js` (OSM buildings, figure-ground drawing, building masses with heights). Also, the site set on the hub (or in any tool) is stored in the browser and reused by the others.
 
 Each tool is a single static HTML file with no build step. Open it in a browser or serve the repo with any static host.
 
