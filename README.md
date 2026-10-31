@@ -64,3 +64,12 @@ All tools share `assets/atools.css` and `assets/atools.js`. Calculations used by
 Each tool is a single static HTML file with no build step. Open it in a browser or serve the repo with any static host.
 
 Data: map tiles © OpenStreetMap contributors (openstreetmap.org standard tiles, greyed in CSS); buildings via the Overpass API; place search via Nominatim. Neighbour heights come from OSM `height` / `building:levels` tags and are often missing, so the tool falls back to an editable default.
+
+## Pilot settings
+
+`assets/atools.js` has a small `CONFIG` block at the top:
+
+- `feedbackKey`: a [Web3Forms](https://web3forms.com) access key. Feedback from the **Feedback** button arrives by e-mail. Left empty, the button opens a prefilled GitHub issue instead.
+- `goatcounter`: a [GoatCounter](https://www.goatcounter.com) site code for a cookie-free visit and download counter. Left empty, nothing is counted.
+
+Both keys are public by design: they can only send, not read.
