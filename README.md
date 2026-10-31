@@ -17,6 +17,7 @@ Free, browser-based design tools for architects and architecture students.
 | Sun Hours | Prototype | [`tools/sun-hours/`](tools/sun-hours/index.html) |
 | Facade Sun | Prototype | [`tools/facade-sun/`](tools/facade-sun/index.html) |
 | Precedent Finder | Prototype | [`tools/precedents/`](tools/precedents/index.html) |
+| Site Section | Prototype | [`tools/site-section/`](tools/site-section/index.html) |
 | Programme & Adjacency | Experimental, not linked from the hub | [`tools/programme/`](tools/programme/index.html) |
 
 ### Sun & Shadow Study
@@ -64,6 +65,10 @@ Draw a footprint or pick a mapped building. Each facade (footprint edge, near-st
 ### Precedent Finder
 
 Searches Wikidata (SPARQL at query.wikidata.org) for buildings by architect (P84), building type (P31, one subclass level), style (P149), country (P17), inception year (P571) and distance from the site (`wikibase:around` on P625). By default only items with a photo (P18) and a known architect. The best known 150 (by sitelink count) come back as cards with Commons thumbnails, a map view and a detail view with the English Wikipedia summary and the photo's author and licence from the Commons API. Starred items form a board kept in the browser, printed as one A3 sheet (up to 9, each photo credited) or exported as CSV. Architect, style and country fields use `wbsearchentities` suggestions.
+
+### Site Section
+
+Draw a line A–B (up to 1 km) on the map. Terrain: 100 samples along the line from Copernicus DEM (90 m) via the Open-Meteo elevation API. Buildings and streets: Overpass around the line. Buildings the line crosses are cut (even-odd intervals of the line against each footprint, holes included) and drawn in black; buildings on the chosen side within a set depth are projected onto the section plane and drawn as a lighter elevation, far to near, standing on the ground level at their own centre. Streets crossed are marked with their width (`width` tag, else lanes or a default per road class). For the widest street crossed, W is the distance between the first cut buildings either side and H their mean height. Spot levels every 5–250 m and at building bases. Exports: SVG, DXF (R12 polylines and text in metres, x from A, y above sea level) and an A3 print at a true scale (1:100 to 1:5000) with optional vertical exaggeration.
 
 ### Programme & Adjacency
 
