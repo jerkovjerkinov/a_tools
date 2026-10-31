@@ -138,7 +138,7 @@ async function load() {
     $('status').textContent = `${geo.buildings.length.toLocaleString('en-US')} buildings loaded.`;
     render();
   } catch (e) {
-    $('status').textContent = 'Could not load OpenStreetMap data. The server may be busy; try again in a minute or pick a smaller area.';
+    $('status').textContent = ATools.errorText(e, 'buildings');
   }
   $('load').disabled = false;
 }

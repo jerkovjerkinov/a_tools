@@ -95,6 +95,7 @@
 <script src="https://cdn.jsdelivr.net/npm/earcut@2.2.4/dist/earcut.min.js"></script>
 <script src="../../assets/atools.js"></script>
 <script src="../../assets/lib/fabric.js"></script>
+<script src="../../assets/lib/axo.js"></script>
 <script>
 const $ = id => document.getElementById(id);
 const rad = Math.PI / 180;
@@ -143,9 +144,7 @@ async function fetchTerrain(o) {
     lats.push((o.lat - dLat + 2 * dLat * j / (GRID - 1)).toFixed(5));
     lngs.push((o.lng - dLng + 2 * dLng * i / (GRID - 1)).toFixed(5));
   }
-  const r = await fetch(`https://api.open-meteo.com/v1/elevation?latitude=${lats.join(',')}&longitude=${lngs.join(',')}`);
-  if (!r.ok) throw new Error(r.status);
-  const e = (await r.json()).elevation;
+  const e = (await ATools.fetchJson(`https://api.open-meteo.com/v1/elevation?latitude=${lats.join(',')}&longitude=${lngs.join(',')}`, {}, 20000)).elevation;
   if (!e || e.length !== GRID * GRID) throw new Error('elevation');
   const T = { e, R, step: 2 * R / (GRID - 1) };
   T.base = 0; T.base = groundAt(T, 0, 0);
@@ -200,7 +199,7 @@ async function load() {
   const o = { ...site };
   const [osm, ter] = await Promise.allSettled([fetchOsm(o), $('oTerrain').checked ? fetchTerrain(o) : Promise.resolve(null)]);
   if (osm.status !== 'fulfilled') {
-    $('status').textContent = 'Could not load OpenStreetMap data. The server may be busy; try again in a minute or pick a smaller area.';
+    $('status').textContent = ATools.errorText(osm.reason, 'buildings');
     $('load').disabled = false; return;
   }
   const T = ter.status === 'fulfilled' ? ter.value : null;
@@ -218,58 +217,9 @@ async function load() {
   $('load').disabled = false;
 }
 
-// ---------- Preview: painter's-algorithm axonometric in SVG ----------
+// ---------- Preview ----------
 function drawPreview() {
-  const a = (viewAz - 180) * rad, ca = Math.cos(a), sa = Math.sin(a), k = 0.5;
-  const rot = ([x, y, z]) => [x * ca - y * sa, x * sa + y * ca, z];
-  const faces = [];
-  const shade = (n, base) => {   // n: rotated outward normal (x, y); light from the viewer's left
-    const l = Math.max(0, (-n[0] * .6 - n[1] * .8));
-    const v = Math.round(base + 60 * l);
-    return `rgb(${v},${v - 3},${v - 10})`;
-  };
-  model.buildings.forEach(b => {
-    [b.outer, ...b.holes].forEach(r => r.forEach((p, i) => {
-      const q = r[(i + 1) % r.length];
-      const A = rot([p[0], p[1], b.z0]), B = rot([q[0], q[1], b.z0]);
-      const nx = B[1] - A[1], ny = -(B[0] - A[0]);   // outward normal for counter-clockwise outer rings
-      if (ny >= 0) return;                            // faces away from the viewer
-      const len = Math.hypot(nx, ny) || 1;
-      faces.push({ d: (A[1] + B[1]) / 2, pts: [A, B, rot([q[0], q[1], b.z1]), rot([p[0], p[1], b.z1])], fill: shade([nx / len, ny / len], 165) });
-    }));
-    const roof = b.outer.map(p => rot([p[0], p[1], b.z1]));
-    faces.push({ d: roof.reduce((s, p) => s + p[1], 0) / roof.length + 0.01, pts: roof, holes: b.holes.map(h => h.map(p => rot([p[0], p[1], b.z1]))), fill: '#f4f2ec' });
-  });
-  let ground = '';
-  if (model.T) {
-    terrainTris(model.T).forEach(t => faces.push({ d: Math.max(...t.map(p => rot(p)[1])) + 1e6, pts: t.map(rot), fill: '#e9e6dd', ground: true }));
-  } else {
-    const c = [[-R, -R, 0], [R, -R, 0], [R, R, 0], [-R, R, 0]].map(rot);
-    ground = c;
-  }
-  faces.sort((f, g) => g.d - f.d);
-  // Fit to the viewBox.
-  const proj = p => [p[0], -p[1] * k - p[2]];
-  const all = faces.flatMap(f => f.pts.map(proj)).concat(ground ? ground.map(proj) : []);
-  const xs = all.map(p => p[0]), ys = all.map(p => p[1]);
-  const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys);
-  const S = Math.min(940 / (maxX - minX || 1), 640 / (maxY - minY || 1));
-  const ox = 500 - (minX + maxX) / 2 * S, oy = 350 - (minY + maxY) / 2 * S;
-  const P = p => { const [u, v] = proj(p); return (ox + u * S).toFixed(1) + ',' + (oy + v * S).toFixed(1); };
-  const ring = pts => 'M' + pts.map(P).join('L') + 'Z';
-  let s = '';
-  if (ground) s += `<path d="${ring(ground)}" fill="#e9e6dd" stroke="#d6d2c7"/>`;
-  faces.forEach(f => {
-    s += f.ground ? `<path d="${ring(f.pts)}" fill="${f.fill}" stroke="${f.fill}" stroke-width=".6"/>`
-      : `<path d="${ring(f.pts)}${(f.holes || []).map(ring).join('')}" fill="${f.fill}" fill-rule="evenodd" stroke="#4a4945" stroke-width=".35" stroke-linejoin="round"/>`;
-  });
-  // Site marker at ground level and a north arrow.
-  const z0 = model.T ? groundAt(model.T, 0, 0) : 0, sp = P(rot([0, 0, z0])).split(',');
-  s += `<circle cx="${sp[0]}" cy="${sp[1]}" r="6" fill="#c8553d" stroke="#fff" stroke-width="2"/>`;
-  const n = rot([0, 1, 0]), nl = Math.hypot(n[0], n[1] * k) || 1, nx = n[0] / nl, ny = -n[1] * k / nl;
-  s += `<g transform="translate(950 60)"><circle r="22" fill="#fff" stroke="#e3e0d8"/><path d="M${nx * 16} ${ny * 16} L${-ny * 8 - nx * 12} ${nx * 8 - ny * 12} L${-nx * 5} ${-ny * 5} L${ny * 8 - nx * 12} ${-nx * 8 - ny * 12}Z" fill="#1b1b19"/>` +
-       `<text x="${nx * 32}" y="${ny * 32 + 4}" text-anchor="middle" font-size="12" font-weight="600" fill="#1b1b19">N</text></g>`;
-  $('axo').innerHTML = s;
+  $('axo').innerHTML = ATAxo.svg(model.buildings, { R, viewAz, terrain: model.T ? terrainTris(model.T) : null, siteZ: model.T ? groundAt(model.T, 0, 0) : 0 });
   const dirs = { 225: 'south-west', 135: 'south-east', 45: 'north-east', 315: 'north-west' };
   $('vSub').textContent = `${2 * R >= 1000 ? 2 * R / 1000 + ' km' : 2 * R + ' m'} square around ${model.site.name || 'the site'}, seen from the ${dirs[viewAz]}. Grey roofs are flat; real roof shapes are not modelled.`;
 }
@@ -281,7 +231,7 @@ function allTris() {
   return parts;
 }
 const f3 = v => (Math.round(v * 1000) / 1000).toString();
-function fileBase() { return 'context-' + (model.site.name || 'site').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') + `-${2 * R}m`; }
+function fileBase() { return `context-${ATools.slug(model.site.name)}-${2 * R}m`; }
 
 function exportObj() {
   const out = ['# a_tools 3D context · metres · origin at site · Y up, -Z north', `# ${model.site.lat.toFixed(6)}, ${model.site.lng.toFixed(6)} · © OpenStreetMap contributors`];

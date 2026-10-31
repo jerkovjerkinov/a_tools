@@ -217,8 +217,11 @@ async function run() {
   try {
     const j = await ATFabric.fetchMasses(s, R + MARGIN);
     masses = ATFabric.masses(j, s, R + MARGIN, { defH: +$('defH').value || 9, floorH: 3 });
-  } catch {
-    note = ' Neighbouring buildings could not be loaded, so only your building casts shadows.';
+  } catch (e) {
+    if (footprint.length < 3) {   // nothing would cast a shadow: a result would only mislead
+      clearResult(); $('status').textContent = ATools.errorText(e, 'neighbouring buildings'); $('run').disabled = false; return;
+    }
+    note = ' ' + ATools.errorText(e, 'neighbouring buildings') + ' Only your building casts shadows.';
   }
   if (footprint.length >= 3) {
     const own = ATFabric.clean(footprint.map(([la, ln]) => ATFabric.xy(la, ln, s)), true);

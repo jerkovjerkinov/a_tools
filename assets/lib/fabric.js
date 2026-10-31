@@ -12,9 +12,9 @@ async function load(site, R) {
     way["highway"]["highway"!~"^(proposed|construction|platform|corridor|elevator|steps)$"]; out geom;
     (way["natural"="water"];relation["natural"="water"];way["waterway"="riverbank"];way["natural"="coastline"];)->.w; .w out geom;
     (way["leisure"~"^(park|garden|playground|pitch)$"];way["landuse"~"^(grass|forest|recreation_ground|cemetery|meadow)$"];relation["leisure"="park"];)->.g; .g out geom;`;
-  const r = await fetch('https://overpass-api.de/api/interpreter', { method: 'POST', body: 'data=' + encodeURIComponent(q) });
-  if (!r.ok) throw new Error(r.status);
-  return parse(await r.json(), site, R);
+  const j = await ATools.overpass(q), geo = parse(j, site, R);
+  geo.raw = j;   // kept so callers can build masses from the same download
+  return geo;
 }
 
 function parse(j, site, R) {
@@ -105,9 +105,7 @@ async function fetchMasses(site, R, { roads = false } = {}) {
   const q = `[out:json][timeout:60][bbox:${bb}];
     (way["building"];relation["building"]["type"="multipolygon"];); out geom;
     ${roads ? 'way["highway"]["highway"!~"^(proposed|construction|platform|corridor|elevator|steps)$"]; out geom;' : ''}`;
-  const r = await fetch('https://overpass-api.de/api/interpreter', { method: 'POST', body: 'data=' + encodeURIComponent(q) });
-  if (!r.ok) throw new Error(r.status);
-  return r.json();
+  return ATools.overpass(q);
 }
 
 // Overpass JSON → [{ outer, holes, z0, z1, known }] in local metres; ground(x, y) gives the terrain height.

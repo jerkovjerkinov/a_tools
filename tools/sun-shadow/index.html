@@ -264,8 +264,7 @@ async function loadNeighbours() {
   $('ctxInfo').innerHTML = '<span class="spinner"></span>Loading neighbours…';
   const q = `[out:json][timeout:20];way["building"](around:200,${lat},${lng});out geom;`;
   try {
-    const r = await fetch('https://overpass-api.de/api/interpreter', { method: 'POST', body: 'data=' + encodeURIComponent(q) });
-    const j = await r.json();
+    const j = await ATools.overpass(q, 30000);
     const fpC = state.footprint.length ? centroid(state.footprint) : null;
     neighbourLayer.clearLayers();
     let known = 0;
@@ -289,7 +288,7 @@ async function loadNeighbours() {
     });
     $('ctxInfo').textContent = `${state.neighbours.length} buildings within 200 m, ${known} with height data. Tap one to set its height.`;
   } catch (err) {
-    $('ctxInfo').textContent = 'Could not load neighbours from OpenStreetMap.';
+    $('ctxInfo').textContent = ATools.errorText(err, 'neighbouring buildings');
   }
   render();
 }

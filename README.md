@@ -15,7 +15,7 @@ Free, browser-based design tools for architects and architecture students.
 | Site Analysis Sheet | Prototype | [`tools/site-sheet/`](tools/site-sheet/index.html) |
 | 3D Context | Prototype | [`tools/context-3d/`](tools/context-3d/index.html) |
 | Sun Hours | Prototype | [`tools/sun-hours/`](tools/sun-hours/index.html) |
-| Programme & Adjacency | Prototype | [`tools/programme/`](tools/programme/index.html) |
+| Programme & Adjacency | Experimental, not linked from the hub | [`tools/programme/`](tools/programme/index.html) |
 
 ### Sun & Shadow Study
 

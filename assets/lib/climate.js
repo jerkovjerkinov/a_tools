@@ -14,9 +14,9 @@ async function fetchYear(site, y) {
     hourly: 'temperature_2m,relative_humidity_2m,precipitation,wind_speed_10m,wind_direction_10m,shortwave_radiation',
     wind_speed_unit: 'ms', timezone: 'auto'
   });
-  const r = await fetch(url);
-  if (!r.ok) throw new Error(r.status);
-  const d = analyse((await r.json()).hourly, y);
+  const j = await ATools.fetchJson(url, {}, 45000);
+  if (!j.hourly || !j.hourly.time || !j.hourly.time.length) throw Object.assign(new Error('empty'), { why: 'No weather data came back for this place and year.' });
+  const d = analyse(j.hourly, y);
   d.lat = site.lat;
   return d;
 }

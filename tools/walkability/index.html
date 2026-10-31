@@ -134,12 +134,12 @@ async function load() {
     way["highway"]["highway"!~"^(motorway|motorway_link|trunk_link|construction|proposed|raceway|bus_guideway)$"]["foot"!~"^(no|private)$"]["access"!~"^(no|private)$"]${around}->.w;
     .w out body; .w >; out skel qt;
     (${CATS.map(c => c.q.split(';').map(x => x + around).join(';')).join(';')};); out center tags;`;
-  try {
-    const r = await fetch('https://overpass-api.de/api/interpreter', { method: 'POST', body: 'data=' + encodeURIComponent(q) });
-    if (!r.ok) throw new Error(r.status);
-    analyse(await r.json(), maxM);
-  } catch (e) {
-    $('status').textContent = 'Could not load OpenStreetMap data. The server may be busy; try again in a minute.';
+  let j = null;
+  try { j = await ATools.overpass(q); }
+  catch (e) { $('status').textContent = ATools.errorText(e, 'the street network'); }
+  if (j) {
+    try { analyse(j, maxM); }
+    catch (e) { console.error(e); $('status').textContent = 'The street network loaded but could not be analysed here. Try another start point.'; }
   }
   $('load').disabled = false;
 }
