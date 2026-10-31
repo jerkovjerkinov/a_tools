@@ -1,0 +1,337 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sun & Shadow · a_tools</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="../../assets/atools.css">
+<style>
+  .leaflet-pane.shadow-pane { opacity: .42; }
+  #sunpath { width: 100%; height: auto; display: block; }
+  .print-only { display: none; }
+  @media print { .print-only { display: block; } }
+</style>
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="../../index.html"><span class="brand-mark"></span>a_tools</a>
+  <span class="crumb">/ <b>Sun &amp; Shadow</b></span>
+  <span class="spacer"></span>
+  <span class="site-pill" id="sitePill" hidden></span>
+</header>
+
+<main class="tool">
+  <aside class="panel">
+    <h1>Sun &amp; Shadow</h1>
+    <p class="lead">Draw your building on the map and see its shadows, and its neighbours', for any day and hour.</p>
+
+    <div class="group noprint">
+      <p class="group-title"><span class="step">1</span>Site</p>
+      <div class="row">
+        <input id="q" type="text" placeholder="Search a place, e.g. Kadıköy, Istanbul">
+        <button id="go" class="btn" style="flex:0 0 auto">Go</button>
+      </div>
+      <p class="hint">Or pan and zoom the map to your plot.</p>
+    </div>
+
+    <div class="group noprint">
+      <p class="group-title"><span class="step">2</span>Building</p>
+      <div class="row">
+        <button id="draw" class="btn primary">Draw footprint</button>
+        <button id="clear" class="btn" style="flex:0 0 auto">Clear</button>
+      </div>
+      <p class="hint" id="drawHint">Tap the corners on the map, then tap the first corner (or Finish) to close.</p>
+      <div class="grid-2" style="margin-top:10px">
+        <div class="field"><label for="h">Height <span class="unit">m</span></label>
+          <input id="h" type="number" min="1" max="500" step="0.5" value="15"></div>
+        <div class="field"><label for="defH">Neighbour default <span class="unit">m</span></label>
+          <input id="defH" type="number" min="1" max="200" step="0.5" value="9"></div>
+      </div>
+      <label class="check"><input id="ctx" type="checkbox" checked>Include neighbouring buildings (OpenStreetMap)</label>
+      <p class="hint" id="ctxInfo"></p>
+    </div>
+
+    <div class="group">
+      <p class="group-title noprint"><span class="step">3</span>Date &amp; time</p>
+      <div class="print-only" id="printInfo"></div>
+      <div class="noprint">
+        <div class="chips" id="presets">
+          <button class="chip" data-d="12-21">21 Dec</button>
+          <button class="chip" data-d="03-20">20 Mar</button>
+          <button class="chip" data-d="06-21">21 Jun</button>
+          <button class="chip" data-d="09-22">22 Sep</button>
+        </div>
+        <div class="grid-2">
+          <div class="field"><label for="date">Date</label><input id="date" type="date"></div>
+          <div class="field"><label for="tz">UTC offset <span class="unit">h</span></label>
+            <input id="tz" type="number" step="0.5" min="-12" max="14"></div>
+        </div>
+        <div class="field"><label for="t">Time <b id="tLabel" style="color:var(--ink)"></b></label>
+          <input id="t" type="range" min="0" max="1439" step="5" value="720"></div>
+        <div class="row" style="margin-bottom:12px">
+          <button id="play" class="btn">▶ Animate day</button>
+          <button id="multi" class="btn">9 · 12 · 15</button>
+        </div>
+      </div>
+      <div class="stats">
+        <div class="stat"><b id="alt">–</b><span>Sun altitude</span></div>
+        <div class="stat"><b id="az">–</b><span>Sun azimuth</span></div>
+        <div class="stat"><b id="rise">–</b><span>Sunrise</span></div>
+        <div class="stat"><b id="set">–</b><span>Sunset</span></div>
+        <div class="stat"><b id="len">–</b><span>Shadow length</span></div>
+        <div class="stat"><b id="dayl">–</b><span>Daylight</span></div>
+      </div>
+    </div>
+
+    <div class="group">
+      <p class="group-title">Sun path</p>
+      <svg id="sunpath" viewBox="0 0 300 300" xmlns="http://www.w3.org/2000/svg"></svg>
+      <div class="legend">
+        <span><i style="background:#2f5d8a"></i>21 Dec</span>
+        <span><i style="background:#5d8a3c"></i>Equinox</span>
+        <span><i style="background:#c0392b"></i>21 Jun</span>
+        <span><i style="background:var(--accent);border-radius:50%"></i>Now</span>
+      </div>
+    </div>
+
+    <div class="group noprint">
+      <p class="group-title">Export</p>
+      <div class="row">
+        <button id="svg" class="btn">Sun path · SVG</button>
+        <button id="print" class="btn">Sheet · PDF</button>
+      </div>
+      <p class="note">Neighbour heights come from OpenStreetMap and are often missing. Tap a grey building to set its real height before using results.</p>
+    </div>
+  </aside>
+  <div class="canvas map"><div id="map" class="fill"></div></div>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="../../assets/atools.js"></script>
+<script src="../../assets/lib/sun.js"></script>
+<script>
+const Sun = ATSun;
+
+// ---------- State ----------
+const $ = id => document.getElementById(id);
+const state = { footprint: [], drawing: false, neighbours: [], multi: false, playing: null };
+const saved = ATools.getSite();
+const map = ATools.baseMap('map', saved ? [saved.lat, saved.lng] : [41.0082, 28.9784], 17);
+map.createPane('shadow').classList.add('shadow-pane');
+map.getPane('shadow').style.zIndex = 390;
+const shadowLayer = L.layerGroup().addTo(map);
+const neighbourLayer = L.layerGroup().addTo(map);
+const plotLayer = L.layerGroup().addTo(map);
+const draftLayer = L.layerGroup().addTo(map);
+
+// ---------- Local metric projection ----------
+function toXY(ll, o) { return [(ll[1] - o[1]) * 111320 * Math.cos(o[0] * Sun.rad), (ll[0] - o[0]) * 110540]; }
+function toLL(xy, o) { return [o[0] + xy[1] / 110540, o[1] + xy[0] / (111320 * Math.cos(o[0] * Sun.rad))]; }
+function centroid(pts) {
+  const n = pts.length; return [pts.reduce((s, p) => s + p[0], 0) / n, pts.reduce((s, p) => s + p[1], 0) / n];
+}
+
+// Shadow of a vertical prism = footprint plus one quad per edge swept along the shadow vector.
+function prismShadow(poly, h, sun, o) {
+  if (sun.alt <= 0.002 || poly.length < 3) return [];
+  const L = h / Math.tan(sun.alt);
+  const dx = -Math.sin(sun.az) * L, dy = -Math.cos(sun.az) * L;   // away from the sun
+  const xy = poly.map(p => toXY(p, o));
+  const shapes = [xy];
+  for (let i = 0; i < xy.length; i++) {
+    const a = xy[i], b = xy[(i + 1) % xy.length];
+    shapes.push([a, b, [b[0] + dx, b[1] + dy], [a[0] + dx, a[1] + dy]]);
+  }
+  return shapes.map(s => s.map(p => toLL(p, o)));
+}
+
+// ---------- Time helpers ----------
+function siteLL() {
+  return state.footprint.length ? centroid(state.footprint) : [map.getCenter().lat, map.getCenter().lng];
+}
+function currentDate(minutes) {
+  const [y, m, d] = $('date').value.split('-').map(Number);
+  const tz = parseFloat($('tz').value) || 0;
+  const mins = minutes ?? +$('t').value;
+  return new Date(Date.UTC(y, m - 1, d, 0, 0) + (mins - tz * 60) * 6e4);
+}
+const fmt = m => String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(Math.round(m % 60)).padStart(2, '0');
+const deg = r => r / Sun.rad;
+const compass = a => ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'][Math.round(deg(a) / 45) % 8];
+const tzLabel = () => 'UTC' + (+$('tz').value >= 0 ? '+' : '') + $('tz').value;
+
+function sunTimes(lat, lng) {
+  let rise = null, set = null, prev = null;
+  for (let m = 0; m <= 1440; m += 2) {
+    const up = Sun.position(currentDate(m), lat, lng).alt > -0.833 * Sun.rad;
+    if (prev !== null && up && !prev) rise = m;
+    if (prev !== null && !up && prev) set = m;
+    prev = up;
+  }
+  return { rise, set };
+}
+
+// ---------- Rendering ----------
+function render() {
+  const [lat, lng] = siteLL();
+  const mins = +$('t').value;
+  $('tLabel').textContent = fmt(mins) + ' · ' + tzLabel();
+  const sun = Sun.position(currentDate(), lat, lng);
+  const h = parseFloat($('h').value) || 0;
+
+  $('alt').textContent = sun.alt > 0 ? deg(sun.alt).toFixed(1) + '°' : 'Below horizon';
+  $('az').textContent = deg(sun.az).toFixed(0) + '° ' + compass(sun.az);
+  $('len').textContent = sun.alt > 0 ? (h / Math.tan(sun.alt)).toFixed(1) + ' m' : '–';
+  const t = sunTimes(lat, lng);
+  $('rise').textContent = t.rise != null ? fmt(t.rise) : '–';
+  $('set').textContent = t.set != null ? fmt(t.set) : '–';
+  $('dayl').textContent = (t.rise != null && t.set != null) ? fmt(t.set - t.rise) : '–';
+  document.querySelectorAll('#presets .chip').forEach(c => c.classList.toggle('on', $('date').value.endsWith(c.dataset.d)));
+  $('printInfo').innerHTML = `<p><b>${$('date').value}</b>, ${state.multi ? '09:00 · 12:00 · 15:00' : fmt(mins)} (${tzLabel()})<br>` +
+    `Site ${lat.toFixed(5)}, ${lng.toFixed(5)} · Building height ${h} m</p>`;
+
+  shadowLayer.clearLayers();
+  const times = state.multi ? [540, 720, 900] : [mins];
+  const colors = state.multi ? ['#4a6fa5', '#26344f', '#6b4a8a'] : ['#26344f'];
+  const o = [lat, lng];
+  times.forEach((tm, i) => {
+    const s = Sun.position(currentDate(tm), lat, lng);
+    const style = { pane: 'shadow', stroke: false, fillColor: colors[i], fillOpacity: 1, interactive: false };
+    if ($('ctx').checked) state.neighbours.forEach(b =>
+      prismShadow(b.poly, b.h, s, o).forEach(p => L.polygon(p, style).addTo(shadowLayer)));
+    prismShadow(state.footprint, h, s, o).forEach(p => L.polygon(p, style).addTo(shadowLayer));
+  });
+  drawSunPath(lat, lng, sun);
+}
+
+function drawSunPath(lat, lng, now) {
+  $('sunpath').innerHTML = ATSun.pathSvg(lat, lng, { year: $('date').value.slice(0, 4), tz: parseFloat($('tz').value) || 0, now });
+}
+
+// ---------- Footprint drawing ----------
+function drawPlot() {
+  plotLayer.clearLayers();
+  if (state.footprint.length >= 3)
+    L.polygon(state.footprint, { color: '#c8553d', weight: 2, fillColor: '#c8553d', fillOpacity: .35 }).addTo(plotLayer);
+}
+function finishDraw() {
+  state.drawing = false; draftLayer.clearLayers();
+  $('draw').textContent = 'Redraw footprint';
+  map.getContainer().style.cursor = '';
+  if (state.footprint.length < 3) { state.footprint = []; return; }
+  const [lat, lng] = centroid(state.footprint);
+  ATools.setSite({ ...(ATools.getSite() || {}), lat, lng });
+  drawPlot(); autoTz(); loadNeighbours(); render();
+}
+$('draw').onclick = () => {
+  if (state.drawing) return finishDraw();
+  state.drawing = true; state.footprint = []; plotLayer.clearLayers(); draftLayer.clearLayers();
+  $('draw').textContent = 'Finish';
+  map.getContainer().style.cursor = 'crosshair';
+};
+$('clear').onclick = () => {
+  state.footprint = []; state.neighbours = []; state.drawing = false;
+  plotLayer.clearLayers(); draftLayer.clearLayers(); neighbourLayer.clearLayers();
+  $('draw').textContent = 'Draw footprint'; $('ctxInfo').textContent = ''; render();
+};
+map.on('click', e => {
+  if (!state.drawing) return;
+  const p = [e.latlng.lat, e.latlng.lng];
+  if (state.footprint.length >= 3) {
+    const a = map.latLngToContainerPoint(state.footprint[0]), b = map.latLngToContainerPoint(e.latlng);
+    if (a.distanceTo(b) < 14) return finishDraw();
+  }
+  state.footprint.push(p);
+  draftLayer.clearLayers();
+  L.polyline(state.footprint, { color: '#c8553d', dashArray: '4 4' }).addTo(draftLayer);
+  state.footprint.forEach((q, i) => L.circleMarker(q, { radius: i ? 4 : 6, color: '#c8553d', fillOpacity: 1 }).addTo(draftLayer));
+});
+
+// ---------- Neighbours from OpenStreetMap (Overpass) ----------
+function osmHeight(tags) {
+  const h = parseFloat(tags.height);
+  if (!isNaN(h)) return { h, known: true };
+  const lv = parseFloat(tags['building:levels']);
+  if (!isNaN(lv)) return { h: lv * 3 + (parseFloat(tags['roof:levels']) || 0) * 1.5, known: true };
+  return { h: parseFloat($('defH').value) || 9, known: false };
+}
+async function loadNeighbours() {
+  if (!$('ctx').checked) return;
+  const [lat, lng] = siteLL();
+  $('ctxInfo').innerHTML = '<span class="spinner"></span>Loading neighbours…';
+  const q = `[out:json][timeout:20];way["building"](around:200,${lat},${lng});out geom;`;
+  try {
+    const j = await ATools.overpass(q, 30000);
+    const fpC = state.footprint.length ? centroid(state.footprint) : null;
+    neighbourLayer.clearLayers();
+    let known = 0;
+    state.neighbours = j.elements.filter(w => w.geometry && w.geometry.length > 3).map(w => {
+      const poly = w.geometry.map(g => [g.lat, g.lon]); poly.pop();
+      const hh = osmHeight(w.tags || {}); if (hh.known) known++;
+      return { poly, h: hh.h, known: hh.known };
+    }).filter(b => {  // drop the OSM building that sits where the user drew theirs
+      if (!fpC) return true;
+      const d = toXY(centroid(b.poly), fpC);
+      return Math.hypot(d[0], d[1]) > 6;
+    });
+    state.neighbours.forEach(b => {
+      const poly = L.polygon(b.poly, { color: b.known ? '#4a4945' : '#a09d95', weight: 1, fillColor: '#c9c6bd', fillOpacity: .55 })
+        .bindTooltip(() => `${b.h.toFixed(1)} m${b.known ? '' : ' (assumed)'} · tap to edit`).addTo(neighbourLayer);
+      poly.on('click', () => {
+        if (state.drawing) return;
+        const v = prompt('Height of this building (m)', b.h.toFixed(1));
+        if (v !== null && !isNaN(parseFloat(v))) { b.h = parseFloat(v); b.known = true; poly.setStyle({ color: '#4a4945' }); render(); }
+      });
+    });
+    $('ctxInfo').textContent = `${state.neighbours.length} buildings within 200 m, ${known} with height data. Tap one to set its height.`;
+  } catch (err) {
+    $('ctxInfo').textContent = ATools.errorText(err, 'neighbouring buildings');
+  }
+  render();
+}
+
+// ---------- Controls ----------
+function autoTz() {
+  const [lat, lng] = siteLL();
+  $('tz').value = ATSun.guessTz(lat, lng);
+}
+$('go').onclick = async () => {
+  const q = $('q').value.trim(); if (!q) return;
+  try {
+    const s = await ATools.geocode(q);
+    if (!s) return alert('Place not found.');
+    map.setView([s.lat, s.lng], 18); ATools.setSite(s); autoTz(); render();
+  } catch { alert('Search failed. Pan the map instead.'); }
+};
+$('q').addEventListener('keydown', e => { if (e.key === 'Enter') $('go').click(); });
+document.querySelectorAll('#presets .chip').forEach(b => b.onclick = () => {
+  $('date').value = $('date').value.slice(0, 4) + '-' + b.dataset.d; render();
+});
+['t', 'h', 'date', 'tz'].forEach(id => $(id).addEventListener('input', render));
+$('ctx').addEventListener('change', () => { if ($('ctx').checked && !state.neighbours.length) loadNeighbours(); else render(); });
+$('defH').addEventListener('change', () => { state.neighbours.forEach(b => { if (!b.known) b.h = parseFloat($('defH').value) || 9; }); render(); });
+$('multi').onclick = () => { state.multi = !state.multi; $('multi').classList.toggle('primary', state.multi); render(); };
+$('play').onclick = () => {
+  if (state.playing) { clearInterval(state.playing); state.playing = null; $('play').textContent = '▶ Animate day'; return; }
+  const [lat, lng] = siteLL(), t = sunTimes(lat, lng);
+  let m = t.rise ?? 360;
+  $('play').textContent = '■ Stop';
+  state.playing = setInterval(() => {
+    m += 10; if (m > (t.set ?? 1080)) m = t.rise ?? 360;
+    $('t').value = m; render();
+  }, 120);
+};
+map.on('moveend', () => { if (!state.footprint.length) render(); });
+$('svg').onclick = () => ATools.downloadSvg($('sunpath'), 'sun-path.svg');
+$('print').onclick = () => window.print();
+
+// ---------- Init ----------
+$('date').value = new Date().getFullYear() + '-12-21';
+autoTz();
+render();
+</script>
+</body>
+</html>

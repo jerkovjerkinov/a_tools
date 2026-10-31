@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Site Climate · a_tools</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="../../assets/atools.css">
+<style>
+  #pick { height: 220px; border-radius: var(--radius-sm); border: 1px solid var(--line); overflow: hidden; margin-top: 8px; }
+  .card .chips { margin: 0 0 6px; }
+</style>
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="../../index.html"><span class="brand-mark"></span>a_tools</a>
+  <span class="crumb">/ <b>Site Climate</b></span>
+  <span class="spacer"></span>
+  <span class="site-pill" id="sitePill" hidden></span>
+</header>
+
+<main class="tool">
+  <aside class="panel">
+    <h1>Site Climate</h1>
+    <p class="lead">A year of hourly weather for your site, turned into the charts and design clues a site analysis needs.</p>
+
+    <div class="group">
+      <p class="group-title"><span class="step">1</span>Location</p>
+      <div class="row noprint">
+        <input id="q" type="text" placeholder="Search a place">
+        <button id="go" class="btn" style="flex:0 0 auto">Go</button>
+      </div>
+      <div id="pick" class="noprint"></div>
+      <p class="hint" id="where">Tap the map to place the site.</p>
+    </div>
+
+    <div class="group noprint">
+      <p class="group-title"><span class="step">2</span>Data</p>
+      <div class="field"><label for="year">Year</label><select id="year"></select></div>
+      <button id="load" class="btn primary block">Analyse climate</button>
+      <p class="hint" id="status"></p>
+    </div>
+
+    <div class="group">
+      <p class="group-title">Key figures</p>
+      <div class="stats">
+        <div class="stat"><b id="kT">–</b><span>Mean temperature</span></div>
+        <div class="stat"><b id="kRange">–</b><span>Daily range (mean)</span></div>
+        <div class="stat"><b id="kHot">–</b><span>Warmest month, mean max</span></div>
+        <div class="stat"><b id="kCold">–</b><span>Coldest month, mean min</span></div>
+        <div class="stat"><b id="kHDD">–</b><span>Heating degree days (18 °C)</span></div>
+        <div class="stat"><b id="kCDD">–</b><span>Cooling degree days (24 °C)</span></div>
+        <div class="stat"><b id="kRain">–</b><span>Annual precipitation</span></div>
+        <div class="stat"><b id="kSun">–</b><span>Solar radiation, horizontal</span></div>
+      </div>
+    </div>
+
+    <div class="group noprint">
+      <button id="print" class="btn block">Sheet · PDF</button>
+      <p class="hint">Data: Open-Meteo historical weather API (ERA5 reanalysis, about 25 km grid). Good for site analysis, not for engineering design.</p>
+    </div>
+  </aside>
+
+  <section class="canvas">
+    <div class="sheet" id="sheet">
+      <div class="card wide empty" id="empty"><div><b>Pick a site and press "Analyse climate"</b>Temperature, sun, wind and rain charts will appear here.</div></div>
+    </div>
+  </section>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="../../assets/atools.js"></script>
+<script src="../../assets/lib/climate.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+const { MONTH_NAMES, chartTemp, chartHeat, chartComfort, chartRainSun, r1 } = ATClimate;
+let data = null, windSeason = 'year';
+
+// ---------- Location ----------
+const saved = ATools.getSite();
+let site = saved || { lat: 41.0082, lng: 28.9784, name: 'Istanbul' };
+const pick = ATools.baseMap('pick', [site.lat, site.lng], saved ? 12 : 10);
+const marker = L.circleMarker([site.lat, site.lng], { radius: 8, color: '#fff', weight: 2, fillColor: '#c8553d', fillOpacity: 1 }).addTo(pick);
+function setSite(s, save = true) {
+  site = s; marker.setLatLng([s.lat, s.lng]);
+  $('where').textContent = (s.name ? s.name + ' · ' : '') + s.lat.toFixed(4) + ', ' + s.lng.toFixed(4);
+  if (save) ATools.setSite(s);
+}
+setSite(site, false);
+pick.on('click', e => setSite({ lat: e.latlng.lat, lng: e.latlng.lng }));
+$('go').onclick = async () => {
+  const q = $('q').value.trim(); if (!q) return;
+  try { const s = await ATools.geocode(q); if (!s) return alert('Place not found.'); pick.setView([s.lat, s.lng], 11); setSite(s); }
+  catch { alert('Search failed. Tap the map instead.'); }
+};
+$('q').addEventListener('keydown', e => { if (e.key === 'Enter') $('go').click(); });
+const lastYear = new Date().getFullYear() - 1;
+for (let y = lastYear; y >= lastYear - 10; y--) $('year').add(new Option(y, y));
+
+// ---------- Data ----------
+async function load() {
+  const y = $('year').value;
+  $('status').innerHTML = '<span class="spinner"></span>Downloading 8,760 hours of weather…';
+  $('load').disabled = true;
+  try {
+    data = await ATClimate.fetchYear(site, y);
+    $('status').textContent = `Loaded ${data.n.toLocaleString('en-US')} hours for ${y}.`;
+    render();
+  } catch (e) {
+    $('status').textContent = ATools.errorText(e, 'weather data');
+  }
+  $('load').disabled = false;
+}
+
+// ---------- Render ----------
+function render() {
+  const d = data, ms = d.months;
+  const { hot, cold } = ATClimate.extremes(d);
+  $('kT').textContent = r1(d.mean) + ' °C';
+  $('kRange').textContent = r1(d.range) + ' °C';
+  $('kHot').textContent = `${MONTH_NAMES[hot]} ${r1(ms[hot].max)} °C`;
+  $('kCold').textContent = `${MONTH_NAMES[cold]} ${r1(ms[cold].min)} °C`;
+  $('kHDD').textContent = Math.round(d.hdd).toLocaleString('en-US');
+  $('kCDD').textContent = Math.round(d.cdd).toLocaleString('en-US');
+  $('kRain').textContent = Math.round(d.rain) + ' mm';
+  $('kSun').textContent = Math.round(d.sun).toLocaleString('en-US') + ' kWh/m²';
+
+  $('sheet').innerHTML = `
+    <div class="card wide"><h3>Design notes</h3><p class="sub">What this climate suggests for form, openings and materials · ${d.year}</p><ul class="notes" id="notes"></ul></div>
+    <div class="card"><h3>Temperature by month</h3><p class="sub">Mean daily min–max band, monthly mean line, comfort zone 18–26 °C</p>${chartTemp(ms)}
+      <div class="legend"><span><i style="background:#f3c9bd"></i>Daily min–max</span><span><i style="background:#c8553d"></i>Mean</span><span><i style="background:#e6efe0"></i>Comfort</span></div></div>
+    <div class="card"><h3>Wind rose</h3><p class="sub">Share of hours from each direction, by wind speed (m/s)</p>
+      <div class="chips noprint" id="seasons">
+        <button class="chip" data-s="year">Year</button><button class="chip" data-s="winter">Winter</button>
+        <button class="chip" data-s="spring">Spring</button><button class="chip" data-s="summer">Summer</button><button class="chip" data-s="autumn">Autumn</button>
+      </div><div id="rose"></div>
+      <div class="legend">${ATClimate.roseLegend()}</div></div>
+    <div class="card wide"><h3>Hourly temperature</h3><p class="sub">Every hour of the year: day of year across, hour of day down</p>${chartHeat(d.hours)}
+      <div class="legend"><span><i style="background:#2f5d8a"></i>&lt; 0 °C</span><span><i style="background:#9fbcd6"></i>10</span><span><i style="background:#f4f1ea"></i>20</span><span><i style="background:#e58a6e"></i>30</span><span><i style="background:#8e2a1a"></i>&gt; 38 °C</span></div></div>
+    <div class="card"><h3>Comfort hours</h3><p class="sub">Share of hours below 18 °C, between 18–26 °C, above 26 °C</p>${chartComfort(ms)}
+      <div class="legend"><span><i style="background:#9fbcd6"></i>Cold</span><span><i style="background:#cfe0c3"></i>Comfortable</span><span><i style="background:#e58a6e"></i>Hot</span></div></div>
+    <div class="card"><h3>Rain and sun</h3><p class="sub">Monthly precipitation (mm) and daily solar radiation (kWh/m²)</p>${chartRainSun(ms)}
+      <div class="legend"><span><i style="background:#5e8cb8"></i>Precipitation</span><span><i style="background:#e0a23a"></i>Solar radiation</span></div></div>`;
+  document.querySelectorAll('#seasons .chip').forEach(c => c.onclick = () => { windSeason = c.dataset.s; drawRose(); });
+  drawRose();
+  $('notes').innerHTML = ATClimate.notes(d).map((t, i) => `<li data-i="${i + 1}"><span>${t}</span></li>`).join('');
+}
+
+function drawRose() {
+  document.querySelectorAll('#seasons .chip').forEach(c => c.classList.toggle('on', c.dataset.s === windSeason));
+  $('rose').innerHTML = ATClimate.rose(data, windSeason);
+}
+
+$('load').onclick = load;
+$('print').onclick = () => window.print();
+</script>
+</body>
+</html>

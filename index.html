@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>a_tools · Design tools for architects</title>
+<meta name="description" content="Free, browser-based site analysis and early design tools for architects and architecture students.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="assets/atools.css">
+<style>
+  .wrap { max-width: 1120px; margin: 0 auto; padding: 0 20px; }
+  .hero { padding: 64px 0 36px; display: grid; grid-template-columns: 1.2fr 1fr; gap: 40px; align-items: center; }
+  .hero h1 { font-size: clamp(32px, 5vw, 52px); line-height: 1.05; margin: 0 0 16px; letter-spacing: -0.03em; }
+  .hero h1 em { font-style: normal; color: var(--accent); }
+  .hero p { font-size: 17px; color: var(--ink-2); margin: 0 0 22px; max-width: 520px; }
+  .hero-art { background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 18px; }
+  .site-box { display: flex; gap: 8px; max-width: 520px; }
+  .site-box input { height: 42px; font-size: 15px; }
+  .site-box .btn { height: 42px; padding: 0 16px; }
+  .site-now { margin-top: 10px; font-size: 13px; color: var(--muted); min-height: 18px; }
+  .site-now b { color: var(--ink); }
+  h2.section { font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 34px 0 14px; font-weight: 600; }
+  .tools { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; }
+  .tcard { display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--line); border-radius: 14px;
+    padding: 18px; text-decoration: none; transition: transform .15s, box-shadow .15s, border-color .15s; min-height: 210px; }
+  a.tcard:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(27,27,25,.08); border-color: #cfccc3; }
+  .tcard .ico { width: 44px; height: 44px; border-radius: 10px; background: var(--surface-2); display: grid; place-items: center; margin-bottom: 14px; }
+  .tcard h3 { margin: 0 0 6px; font-size: 17px; }
+  .tcard p { margin: 0; color: var(--ink-2); font-size: 13.5px; flex: 1; }
+  .tcard .meta { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 14px; }
+  .tag { font-size: 11px; font-weight: 500; color: var(--ink-2); background: var(--surface-2); padding: 3px 8px; border-radius: 999px; }
+  .tag.live { background: #e6efe0; color: #3f6b26; }
+  .soon { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }
+  .soon div { border: 1px dashed #cfccc3; border-radius: 10px; padding: 12px 14px; color: var(--ink-2); font-size: 13px; }
+  .soon b { display: block; color: var(--ink); font-size: 14px; margin-bottom: 2px; }
+  .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  .steps div { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 16px; font-size: 13.5px; color: var(--ink-2); }
+  .steps b { display: block; color: var(--ink); margin-bottom: 4px; font-size: 14px; }
+  footer { margin: 56px 0 0; padding: 22px 0 36px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12.5px; }
+  @media (max-width: 820px) {
+    .hero { grid-template-columns: 1fr; padding-top: 36px; gap: 24px; }
+    .steps { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="index.html"><span class="brand-mark"></span>a_tools</a>
+  <span class="spacer"></span>
+  <span class="site-pill" id="sitePill" hidden></span>
+</header>
+
+<div class="wrap">
+  <section class="hero">
+    <div>
+      <h1>Site analysis in <em>minutes</em>, not days.</h1>
+      <p>Free design tools for architects and students. Pick your site once; every tool uses it. No install, no plugin, no Grasshopper.</p>
+      <div class="site-box">
+        <input id="q" type="text" placeholder="Where is your site? e.g. Kadıköy, Istanbul">
+        <button id="go" class="btn primary">Set site</button>
+      </div>
+      <div class="site-now" id="siteNow"></div>
+    </div>
+    <div class="hero-art" aria-hidden="true">
+      <svg viewBox="0 0 400 260" width="100%">
+        <rect width="400" height="260" rx="10" fill="#f6f5f1"/>
+        <g stroke="#e3e0d8"><path d="M0 60H400M0 130H400M0 200H400M90 0V260M210 0V260M320 0V260"/></g>
+        <polygon points="120,150 190,150 190,95 120,95" fill="#26344f" opacity=".18" transform="skewX(-28) translate(70 0)"/>
+        <rect x="120" y="95" width="70" height="55" fill="#c8553d"/>
+        <rect x="230" y="70" width="60" height="45" fill="#c9c6bd"/>
+        <rect x="235" y="160" width="50" height="40" fill="#c9c6bd"/>
+        <circle cx="330" cy="200" r="34" fill="none" stroke="#c9c6bd"/>
+        <path d="M330 200 L330 172 A28 28 0 0 1 352 183 Z" fill="#2f5d8a"/>
+        <path d="M330 200 L352 183 A28 28 0 0 1 356 205 Z" fill="#9fbcd6"/>
+        <path d="M40 230 Q120 150 200 140 T360 60" fill="none" stroke="#e0a23a" stroke-width="2" stroke-dasharray="4 4"/>
+        <circle cx="300" cy="86" r="9" fill="#e0a23a"/>
+      </svg>
+    </div>
+  </section>
+
+  <h2 class="section">Tools</h2>
+  <div class="tools">
+    <a class="tcard" href="tools/site-sheet/index.html">
+      <div class="ico"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#1b1b19" stroke-width="1.6"><rect x="2" y="4" width="20" height="16" rx="1.5"/><rect x="4.5" y="7" width="7" height="10" fill="#1b1b19" stroke="none"/><circle cx="16" cy="9.5" r="2.5" stroke="#c8553d"/><path d="M13.5 16h6" stroke="#2f5d8a"/></svg></div>
+      <h3>Site Analysis Sheet</h3>
+      <p>One click, one A3 board: figure-ground, sun path, wind rose, temperature, rain and sun, key figures and design notes. Print it or save as PDF.</p>
+      <div class="meta"><span class="tag live">New</span><span class="tag">A3 board</span><span class="tag">PDF</span></div>
+    </a>
+    <a class="tcard" href="tools/sun-shadow/index.html">
+      <div class="ico"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#c8553d" stroke-width="1.8"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg></div>
+      <h3>Sun &amp; Shadow</h3>
+      <p>Draw your building on the map and see its shadows and its neighbours' for any day and hour. Sun path diagram included.</p>
+      <div class="meta"><span class="tag live">Live</span><span class="tag">Map</span><span class="tag">SVG · PDF</span></div>
+    </a>
+    <a class="tcard" href="tools/climate/index.html">
+      <div class="ico"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#2f5d8a" stroke-width="1.8"><path d="M3 8h11a3 3 0 1 0-3-3M3 12h15a3 3 0 1 1-3 3M3 16h7"/></svg></div>
+      <h3>Site Climate</h3>
+      <p>A year of hourly weather as temperature, comfort, wind rose, rain and sun charts, plus plain-language design clues.</p>
+      <div class="meta"><span class="tag live">Live</span><span class="tag">Wind rose</span><span class="tag">PDF</span></div>
+    </a>
+    <a class="tcard" href="tools/zoning/index.html">
+      <div class="ico"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#1b1b19" stroke-width="1.8"><path d="M4 20V9l8-5 8 5v11z"/><path d="M9 20v-6h6v6" /><path d="M2 20h20" stroke-dasharray="2 2"/></svg></div>
+      <h3>Zoning Envelope</h3>
+      <p>Plot size, setbacks, coverage, FAR and height limit in; buildable footprint, floors and floor area out. TAKS / KAKS mode for Türkiye.</p>
+      <div class="meta"><span class="tag live">Live</span><span class="tag">FAR · Emsal</span><span class="tag">SVG · PDF</span></div>
+    </a>
+    <a class="tcard" href="tools/figure-ground/index.html">
+      <div class="ico"><svg width="24" height="24" viewBox="0 0 24 24" fill="#1b1b19"><rect x="3" y="3" width="7" height="5"/><rect x="12" y="3" width="9" height="8"/><rect x="3" y="10" width="7" height="11"/><rect x="12" y="13" width="4" height="8"/><rect x="18" y="13" width="3" height="8"/></svg></div>
+      <h3>Figure-Ground</h3>
+      <p>The urban fabric around your site in black and white, with optional roads, water and parks. Grain and coverage figures included.</p>
+      <div class="meta"><span class="tag live">Live</span><span class="tag">Urban fabric</span><span class="tag">SVG · PNG</span></div>
+    </a>
+    <a class="tcard" href="tools/walkability/index.html">
+      <div class="ico"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke-width="2"><circle cx="12" cy="12" r="9" stroke="#c8553d"/><circle cx="12" cy="12" r="5.5" stroke="#e0a23a"/><circle cx="12" cy="12" r="2" fill="#2f8a5d" stroke="#2f8a5d"/></svg></div>
+      <h3>Walkability</h3>
+      <p>Streets reachable on foot in 5, 10 and 15 minutes, the daily needs within reach, and a 15-minute neighbourhood score.</p>
+      <div class="meta"><span class="tag live">Live</span><span class="tag">Map</span><span class="tag">PDF</span></div>
+    </a>
+    <a class="tcard" href="tools/context-3d/index.html">
+      <div class="ico"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#1b1b19" stroke-width="1.6" stroke-linejoin="round"><path d="M3 15l6-3 6 3-6 3z"/><path d="M3 15v-6l6-3v6M9 6l6 3v6"/><path d="M15 9l5-2.5V14l-5 2.5" stroke="#c8553d"/></svg></div>
+      <h3>3D Context</h3>
+      <p>Buildings and terrain around your site as a 3D model. Download OBJ, DXF or STL for Rhino, AutoCAD, Revit, SketchUp Pro, Blender or 3D printing.</p>
+      <div class="meta"><span class="tag live">New</span><span class="tag">3D</span><span class="tag">OBJ · DXF · STL</span></div>
+    </a>
+    <a class="tcard" href="tools/sun-hours/index.html">
+      <div class="ico"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke-width="1.6"><rect x="3" y="3" width="18" height="18" rx="2" stroke="#1b1b19"/><path d="M3 15h18M3 9h18M9 3v18M15 3v18" stroke="#e3e0d8"/><rect x="9" y="9" width="6" height="6" fill="#e0a23a" stroke="none"/><rect x="15" y="15" width="6" height="6" fill="#2f5d8a" stroke="none"/></svg></div>
+      <h3>Sun Hours</h3>
+      <p>Hours of direct sun on every square metre of ground for any day, with neighbours and your own building casting shadows. Checks the 2-hour rule.</p>
+      <div class="meta"><span class="tag live">New</span><span class="tag">Map</span><span class="tag">PNG · PDF</span></div>
+    </a>
+  </div>
+
+  <h2 class="section">Coming next</h2>
+  <div class="soon">
+    <div><b>Facade sun</b>Sun hours and solar radiation on each facade through the year.</div>
+    <div><b>Precedent finder</b>Search case studies by climate, scale, structure and material.</div>
+  </div>
+
+  <h2 class="section">How it works</h2>
+  <div class="steps">
+    <div><b>1 · Set your site</b>Search a place once. Every tool opens there.</div>
+    <div><b>2 · Run the tools</b>Each tool is one page that works on phone and desktop.</div>
+    <div><b>3 · Export</b>Download clean SVG diagrams or print a PDF sheet for your boards.</div>
+  </div>
+
+  <footer>a_tools · open data from OpenStreetMap, Open-Meteo (ERA5, Copernicus DEM). Results are for early design and education, not for permits or engineering.</footer>
+</div>
+
+<script src="assets/atools.js"></script>
+<script>
+  const $ = id => document.getElementById(id);
+  function showNow() {
+    const s = ATools.getSite();
+    $('siteNow').innerHTML = s ? `Current site: <b>${s.name || s.lat.toFixed(4) + ', ' + s.lng.toFixed(4)}</b>` : '';
+  }
+  $('go').onclick = async () => {
+    const q = $('q').value.trim(); if (!q) return;
+    $('siteNow').innerHTML = '<span class="spinner"></span>Finding…';
+    try {
+      const s = await ATools.geocode(q);
+      if (!s) { $('siteNow').textContent = 'Place not found. Try a district or city name.'; return; }
+      ATools.setSite(s); showNow();
+    } catch { $('siteNow').textContent = 'Search failed. You can still set the site inside each tool.'; }
+  };
+  $('q').addEventListener('keydown', e => { if (e.key === 'Enter') $('go').click(); });
+  showNow();
+</script>
+</body>
+</html>

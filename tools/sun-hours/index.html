@@ -1,0 +1,335 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sun Hours · a_tools</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="../../assets/atools.css">
+<style>
+  .ramp { height: 10px; border-radius: 3px; background: linear-gradient(90deg, #26344f, #2f5d8a, #9fbcd6, #f3d27a, #e0a23a); }
+  .ramp-labels { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); margin-top: 3px; }
+  .map-legend { position: absolute; right: 12px; bottom: 24px; z-index: 500; background: rgba(255,255,255,.94); border: 1px solid var(--line);
+    border-radius: var(--radius-sm); padding: 8px 10px; width: 220px; font-size: 11.5px; }
+  .map-legend b { display: block; margin-bottom: 5px; font-size: 12px; }
+  .map-legend[hidden] { display: none; }
+</style>
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="../../index.html"><span class="brand-mark"></span>a_tools</a>
+  <span class="crumb">/ <b>Sun Hours</b></span>
+  <span class="spacer"></span>
+  <span class="site-pill" id="sitePill" hidden></span>
+</header>
+
+<main class="tool">
+  <aside class="panel">
+    <h1>Sun Hours</h1>
+    <p class="lead">How many hours of direct sun each square metre of ground gets on a chosen day, with the neighbours and your own building casting shadows.</p>
+
+    <div class="group">
+      <p class="group-title"><span class="step">1</span>Area</p>
+      <div class="row">
+        <input id="q" type="text" placeholder="Search a place">
+        <button id="go" class="btn" style="flex:0 0 auto">Go</button>
+      </div>
+      <p class="hint">The dashed square is the area analysed. Tap the map to move it.</p>
+      <div class="field" style="margin-top:10px"><span class="label">Size</span>
+        <div class="seg" id="radius"><button data-r="75">150 m</button><button data-r="100" class="on">200 m</button><button data-r="150">300 m</button></div>
+      </div>
+    </div>
+
+    <div class="group">
+      <p class="group-title"><span class="step">2</span>Your building <span class="unit" style="text-transform:none;letter-spacing:0">optional</span></p>
+      <div class="row">
+        <button id="draw" class="btn">Draw footprint</button>
+        <button id="clear" class="btn" style="flex:0 0 auto">Clear</button>
+      </div>
+      <p class="hint" id="drawHint">Tap the corners on the map, then tap the first corner (or Finish) to close.</p>
+      <div class="grid-2" style="margin-top:10px">
+        <div class="field"><label for="h">Height <span class="unit">m</span></label><input id="h" type="number" min="1" max="500" step="0.5" value="15"></div>
+        <div class="field"><label for="defH">Others, if unknown <span class="unit">m</span></label><input id="defH" type="number" min="2" max="200" step="0.5" value="9"></div>
+      </div>
+    </div>
+
+    <div class="group">
+      <p class="group-title"><span class="step">3</span>Day</p>
+      <div class="chips" id="presets">
+        <button class="chip" data-d="12-21">21 Dec</button>
+        <button class="chip on" data-d="03-20">20 Mar</button>
+        <button class="chip" data-d="06-21">21 Jun</button>
+      </div>
+      <div class="field"><label for="date">Date</label><input id="date" type="date"></div>
+      <button id="run" class="btn primary block">Calculate sun hours</button>
+      <p class="hint" id="status"></p>
+    </div>
+
+    <div class="group">
+      <p class="group-title">Result</p>
+      <div class="stats">
+        <div class="stat"><b id="sDay">–</b><span>Daylight that day</span></div>
+        <div class="stat"><b id="sMean">–</b><span>Mean sun on open ground</span></div>
+        <div class="stat"><b id="s2h">–</b><span id="s2hL">Open ground with 2 h+ sun</span></div>
+        <div class="stat"><b id="s0h">–</b><span>Open ground in shade all day</span></div>
+        <div class="stat hero" id="ruleBox"><b id="sRule">–</b><span id="sRuleL">Rule check</span></div>
+      </div>
+    </div>
+
+    <div class="group">
+      <p class="group-title">Sunlight rule</p>
+      <div class="chips" id="rules">
+        <button class="chip on" data-h="2" data-p="50" data-d="03-20">UK BRE</button>
+        <button class="chip" data-custom="1">Custom</button>
+      </div>
+      <div class="grid-2">
+        <div class="field"><label for="ruleH">At least <span class="unit">hours of sun</span></label><input id="ruleH" type="number" min="0.5" max="12" step="0.5" value="2"></div>
+        <div class="field"><label for="ruleP">On at least <span class="unit">% of open ground</span></label><input id="ruleP" type="number" min="1" max="100" step="5" value="50"></div>
+      </div>
+      <p class="hint" id="ruleHint">UK BRE guide: at least half of a garden or open space should get 2 hours of sun on 20 March. Set your own numbers for local rules.</p>
+    </div>
+
+    <div class="group">
+      <div class="row">
+        <button id="png" class="btn" disabled>Map · PNG</button>
+        <button id="print" class="btn">PDF</button>
+      </div>
+      <p class="hint">Buildings and heights © OpenStreetMap contributors; heights are often missing, so check the default. Flat ground, flat roofs, no trees. Sun every 10 minutes.</p>
+    </div>
+  </aside>
+
+  <section class="canvas map">
+    <div id="map" class="fill"></div>
+    <div class="map-legend" id="legend" hidden><b>Hours of direct sun</b><div class="ramp"></div>
+      <div class="ramp-labels"><span>0</span><span id="lMid"></span><span id="lMax"></span></div></div>
+  </section>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="../../assets/atools.js"></script>
+<script src="../../assets/lib/sun.js"></script>
+<script src="../../assets/lib/fabric.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+const rad = Math.PI / 180, MARGIN = 120, STEP = 10;   // metres of neighbours outside the square; minutes per sun step
+let site = ATools.getSite() || { lat: 41.0082, lng: 28.9784, name: 'Istanbul' };
+let R = 100, drawing = false, footprint = [], overlay = null, lastPng = null;
+
+// ---------- Map ----------
+const map = ATools.baseMap('map', [site.lat, site.lng], 17);
+const box = L.rectangle([[0, 0], [0, 0]], { color: '#1b1b19', weight: 1.5, fill: false, dashArray: '5 5', interactive: false }).addTo(map);
+const bLayer = L.layerGroup().addTo(map), plotLayer = L.layerGroup().addTo(map), draftLayer = L.layerGroup().addTo(map);
+function drawBox() {
+  const dLat = R / 110540, dLng = R / (111320 * Math.cos(site.lat * rad));
+  box.setBounds([[site.lat - dLat, site.lng - dLng], [site.lat + dLat, site.lng + dLng]]);
+}
+function setSite(s, save = true) {
+  site = s; drawBox(); clearResult();
+  if (save) ATools.setSite(s);
+}
+setSite(site, false);
+$('go').onclick = async () => {
+  const q = $('q').value.trim(); if (!q) return;
+  try { const s = await ATools.geocode(q); if (!s) return alert('Place not found.'); map.setView([s.lat, s.lng], 17); setSite(s); }
+  catch { alert('Search failed. Tap the map instead.'); }
+};
+$('q').addEventListener('keydown', e => { if (e.key === 'Enter') $('go').click(); });
+document.querySelectorAll('#radius button').forEach(b => b.onclick = () => {
+  document.querySelectorAll('#radius button').forEach(x => x.classList.toggle('on', x === b));
+  R = +b.dataset.r; drawBox(); clearResult();
+});
+
+// ---------- Your building ----------
+function finishDraw() {
+  drawing = false; draftLayer.clearLayers();
+  $('draw').textContent = 'Redraw footprint'; map.getContainer().style.cursor = '';
+  if (footprint.length < 3) { footprint = []; return; }
+  plotLayer.clearLayers();
+  L.polygon(footprint, { color: '#c8553d', weight: 2, fillColor: '#c8553d', fillOpacity: .5 }).addTo(plotLayer);
+  const c = footprint.reduce((a, p) => [a[0] + p[0] / footprint.length, a[1] + p[1] / footprint.length], [0, 0]);
+  setSite({ ...site, lat: c[0], lng: c[1] });
+}
+$('draw').onclick = () => {
+  if (drawing) return finishDraw();
+  drawing = true; footprint = []; plotLayer.clearLayers(); draftLayer.clearLayers();
+  $('draw').textContent = 'Finish'; map.getContainer().style.cursor = 'crosshair';
+};
+$('clear').onclick = () => {
+  drawing = false; footprint = []; plotLayer.clearLayers(); draftLayer.clearLayers();
+  $('draw').textContent = 'Draw footprint'; map.getContainer().style.cursor = ''; clearResult();
+};
+map.on('click', e => {
+  if (!drawing) return setSite({ lat: e.latlng.lat, lng: e.latlng.lng });
+  if (footprint.length >= 3) {
+    const a = map.latLngToContainerPoint(footprint[0]), b = map.latLngToContainerPoint(e.latlng);
+    if (a.distanceTo(b) < 14) return finishDraw();
+  }
+  footprint.push([e.latlng.lat, e.latlng.lng]);
+  draftLayer.clearLayers();
+  L.polyline(footprint, { color: '#c8553d', dashArray: '4 4' }).addTo(draftLayer);
+  footprint.forEach((q, i) => L.circleMarker(q, { radius: i ? 4 : 6, color: '#c8553d', fillOpacity: 1 }).addTo(draftLayer));
+});
+
+// ---------- Day ----------
+const year = new Date().getFullYear();
+function preset(d) {
+  $('date').value = `${year}-${d}`;
+  document.querySelectorAll('#presets .chip').forEach(c => c.classList.toggle('on', c.dataset.d === d));
+}
+document.querySelectorAll('#presets .chip').forEach(c => c.onclick = () => preset(c.dataset.d));
+$('date').addEventListener('change', () => document.querySelectorAll('#presets .chip').forEach(c => c.classList.toggle('on', $('date').value.slice(5) === c.dataset.d)));
+preset('03-20');
+document.querySelectorAll('#rules .chip').forEach(c => c.onclick = () => {
+  document.querySelectorAll('#rules .chip').forEach(x => x.classList.toggle('on', x === c));
+  if (c.dataset.custom) { $('ruleH').focus(); return; }
+  $('ruleH').value = c.dataset.h; $('ruleP').value = c.dataset.p; preset(c.dataset.d);
+});
+['ruleH', 'ruleP'].forEach(id => $(id).addEventListener('input', () =>
+  document.querySelectorAll('#rules .chip').forEach(x => x.classList.toggle('on', !!x.dataset.custom))));
+
+// ---------- Calculation ----------
+function clearResult() {
+  if (overlay) { map.removeLayer(overlay); overlay = null; }
+  bLayer.clearLayers(); $('legend').hidden = true; $('png').disabled = true;
+  ['sDay', 'sMean', 's2h', 's0h', 'sRule'].forEach(id => $(id).textContent = '–');
+  $('ruleBox').style.background = '';
+}
+
+// Sun positions every STEP minutes across the local solar day, above the horizon only.
+function sunSteps(lat, lng, dateStr) {
+  const [Y, M, D] = dateStr.split('-').map(Number);
+  const noon = Date.UTC(Y, M - 1, D, 12) - lng / 15 * 36e5, out = [];
+  for (let m = -720; m < 720; m += STEP) {
+    const s = ATSun.position(new Date(noon + m * 6e4), lat, lng);
+    if (s.alt > 0) out.push(s);
+  }
+  return out;
+}
+
+async function run() {
+  const s = { ...site }, date = $('date').value;
+  if (!date) return;
+  $('run').disabled = true;
+  $('status').innerHTML = '<span class="spinner"></span>Loading neighbouring buildings…';
+  let masses = [], note = '';
+  try {
+    const j = await ATFabric.fetchMasses(s, R + MARGIN);
+    masses = ATFabric.masses(j, s, R + MARGIN, { defH: +$('defH').value || 9, floorH: 3 });
+  } catch (e) {
+    if (footprint.length < 3) {   // nothing would cast a shadow: a result would only mislead
+      clearResult(); $('status').textContent = ATools.errorText(e, 'neighbouring buildings'); $('run').disabled = false; return;
+    }
+    note = ' ' + ATools.errorText(e, 'neighbouring buildings') + ' Only your building casts shadows.';
+  }
+  if (footprint.length >= 3) {
+    const own = ATFabric.clean(footprint.map(([la, ln]) => ATFabric.xy(la, ln, s)), true);
+    // Your building replaces any mapped building it overlaps.
+    masses = masses.filter(m => !ATFabric.inside(m.outer.reduce((a, p) => [a[0] + p[0] / m.outer.length, a[1] + p[1] / m.outer.length], [0, 0]), own));
+    masses.push({ outer: own, holes: [], z0: 0, z1: +$('h').value || 15, known: true, own: true });
+  }
+  $('status').innerHTML = '<span class="spinner"></span>Tracing the sun…';
+  await new Promise(r => setTimeout(r));
+
+  const res = R <= 100 ? 1 : 1.5, N = Math.round(2 * R / res);
+  const steps = sunSteps(s.lat, s.lng, date), hoursPerStep = STEP / 60;
+  const cv = document.createElement('canvas'); cv.width = cv.height = N;
+  const ctx = cv.getContext('2d', { willReadFrequently: true });
+  const px = ([x, y]) => [(x + R) / res, (R - y) / res];
+  const ringPath = (r, dx = 0, dy = 0) => r.forEach((p, i) => { const [u, v] = px([p[0] + dx, p[1] + dy]); i ? ctx.lineTo(u, v) : ctx.moveTo(u, v); });
+  const fillPoly = (rings, dx, dy) => { ctx.beginPath(); rings.forEach(r => { ringPath(r, dx, dy); ctx.closePath(); }); ctx.fill('evenodd'); };
+
+  // Building footprints are not open ground.
+  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, N, N); ctx.fillStyle = '#000';
+  masses.forEach(m => fillPoly([m.outer, ...m.holes], 0, 0));
+  const inB = ctx.getImageData(0, 0, N, N).data;
+
+  const sun = new Uint16Array(N * N);
+  steps.forEach(st => {
+    const k = 1 / Math.tan(st.alt), ux = -Math.sin(st.az) * k, uy = -Math.cos(st.az) * k;   // shadow per metre of height
+    ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, N, N); ctx.fillStyle = '#000';
+    masses.forEach(m => {
+      // Near sunrise and sunset shadows run very long; anything past 3 × the area already covers it.
+      const L0 = Math.hypot(ux, uy) * m.z1, cap = Math.min(1, 3 * (R + MARGIN) / (L0 || 1));
+      const dx = ux * m.z1 * cap, dy = uy * m.z1 * cap;
+      fillPoly([m.outer, ...m.holes], 0, 0);
+      fillPoly([m.outer, ...m.holes], dx, dy);
+      [m.outer, ...m.holes].forEach(r => r.forEach((p, i) => {
+        const q = r[(i + 1) % r.length];
+        ctx.beginPath(); ringPath([p, q, [q[0] + dx, q[1] + dy], [p[0] + dx, p[1] + dy]]); ctx.closePath(); ctx.fill();
+      }));
+    });
+    const d = ctx.getImageData(0, 0, N, N).data;
+    for (let i = 0; i < N * N; i++) if (d[i * 4] > 127) sun[i]++;
+  });
+
+  // Colour the result and collect statistics over open ground.
+  const dayH = steps.length * hoursPerStep, img = ctx.createImageData(N, N);
+  const stops = [[38, 52, 79], [47, 93, 138], [159, 188, 214], [243, 210, 122], [224, 162, 58]];
+  const ruleH = +$('ruleH').value || 2, ruleP = +$('ruleP').value || 50;
+  let open = 0, total = 0, two = 0, zero = 0;
+  for (let i = 0; i < N * N; i++) {
+    const o = i * 4;
+    if (inB[o] < 128) { img.data[o + 3] = 0; continue; }
+    const hrs = sun[i] * hoursPerStep, t = dayH ? Math.min(1, hrs / dayH) : 0;
+    const f = t * (stops.length - 1), a = Math.min(stops.length - 2, Math.floor(f)), w = f - a;
+    for (let c = 0; c < 3; c++) img.data[o + c] = stops[a][c] + (stops[a + 1][c] - stops[a][c]) * w;
+    img.data[o + 3] = 215;
+    open++; total += hrs; if (hrs >= ruleH - 1e-9) two++; if (hrs < hoursPerStep / 2) zero++;
+  }
+  ctx.putImageData(img, 0, 0);
+  masses.forEach(m => { ctx.fillStyle = m.own ? '#c8553d' : '#4a4945'; fillPoly([m.outer, ...m.holes], 0, 0); });
+  lastPng = cv.toDataURL('image/png');
+
+  clearResult();
+  const dLat = R / 110540, dLng = R / (111320 * Math.cos(s.lat * rad));
+  overlay = L.imageOverlay(lastPng, [[s.lat - dLat, s.lng - dLng], [s.lat + dLat, s.lng + dLng]], { interactive: false }).addTo(map);
+  overlay.getElement && overlay.getElement() && (overlay.getElement().style.imageRendering = 'pixelated');
+  const toLL = ([x, y]) => [s.lat + y / 110540, s.lng + x / (111320 * Math.cos(s.lat * rad))];
+  masses.forEach(m => L.polygon([m.outer.map(toLL), ...m.holes.map(h => h.map(toLL))], m.own
+    ? { color: '#c8553d', weight: 1.5, fillColor: '#c8553d', fillOpacity: .85, interactive: false }
+    : { color: '#1b1b19', weight: .6, fillColor: '#4a4945', fillOpacity: .75, interactive: false }).addTo(bLayer));
+
+  const f1 = x => (Math.round(x * 10) / 10).toFixed(1);
+  $('sDay').textContent = f1(dayH) + ' h';
+  $('sMean').textContent = open ? f1(total / open) + ' h' : '–';
+  $('s2h').textContent = open ? Math.round(100 * two / open) + '%' : '–';
+  $('s2hL').textContent = `Open ground with ${ruleH} h+ sun`;
+  const pass = open && 100 * two / open >= ruleP;
+  $('sRule').textContent = !open ? '–' : pass ? 'Passes' : 'Fails';
+  $('sRuleL').textContent = `${ruleP}% of open ground needs ${ruleH} h of sun on ${date}`;
+  $('ruleBox').style.background = !open ? '' : pass ? '#3f6b26' : '#a5402d';
+  $('s0h').textContent = open ? Math.round(100 * zero / open) + '%' : '–';
+  $('lMid').textContent = f1(dayH / 2) + ' h'; $('lMax').textContent = f1(dayH) + ' h';
+  $('legend').hidden = false; $('png').disabled = false;
+  const nm = masses.filter(m => !m.own).length;
+  $('status').textContent = `${nm} neighbouring building${nm === 1 ? '' : 's'}${footprint.length >= 3 ? ' and your building' : ''} · ${steps.length} sun positions on ${date}.` + note;
+  $('run').disabled = false;
+}
+
+$('run').onclick = run;
+// PNG: the heatmap enlarged, with a caption, colour scale and data credit.
+$('png').onclick = () => {
+  const img = new Image();
+  img.onload = () => {
+    const S = 1200, foot = 90, c = document.createElement('canvas'); c.width = S; c.height = S + foot;
+    const g = c.getContext('2d');
+    g.fillStyle = '#fff'; g.fillRect(0, 0, S, S + foot);
+    g.imageSmoothingEnabled = false; g.drawImage(img, 0, 0, S, S);
+    const grad = g.createLinearGradient(24, 0, 324, 0);
+    ['#26344f', '#2f5d8a', '#9fbcd6', '#f3d27a', '#e0a23a'].forEach((col, i) => grad.addColorStop(i / 4, col));
+    g.fillStyle = grad; g.fillRect(24, S + 20, 300, 12);
+    g.fillStyle = '#1b1b19'; g.font = '600 18px Inter, sans-serif';
+    g.fillText(`Hours of direct sun · ${$('date').value} · ${site.name || site.lat.toFixed(4) + ', ' + site.lng.toFixed(4)}`, 350, S + 32);
+    g.font = '14px Inter, sans-serif'; g.fillStyle = '#4a4945';
+    g.fillText(`0 h`, 24, S + 52); g.textAlign = 'right'; g.fillText($('lMax').textContent, 324, S + 52); g.textAlign = 'left';
+    g.fillText(`${2 * R} m square, north up · Buildings © OpenStreetMap contributors · a_tools`, 350, S + 58);
+    const a = document.createElement('a'); a.href = c.toDataURL('image/png'); a.download = `sun-hours-${$('date').value}.png`; a.click();
+  };
+  img.src = lastPng;
+};
+$('print').onclick = () => window.print();
+</script>
+</body>
+</html>
