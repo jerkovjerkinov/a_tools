@@ -1,0 +1,482 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Facade Sun · a_tools</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="../../assets/atools.css">
+<style>
+  .ramp { height: 10px; border-radius: 3px; background: linear-gradient(90deg, #26344f, #2f5d8a, #9fbcd6, #f3d27a, #e0a23a); }
+  .ramp-labels { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); margin-top: 3px; }
+  .map-legend { position: absolute; right: 12px; bottom: 24px; z-index: 500; background: rgba(255,255,255,.94); border: 1px solid var(--line);
+    border-radius: var(--radius-sm); padding: 8px 10px; width: 220px; font-size: 11.5px; }
+  .map-legend b { display: block; margin-bottom: 5px; font-size: 12px; }
+  .map-legend[hidden] { display: none; }
+  .flabel { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; background: #1b1b19; color: #fff;
+    font: 700 12px Inter, sans-serif; border: 2px solid #fff; box-shadow: 0 1px 3px rgba(0,0,0,.3); }
+  table.fs { width: 100%; border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; }
+  table.fs th { text-align: right; font-weight: 500; color: var(--muted); font-size: 11px; padding: 4px 3px; border-bottom: 1px solid var(--line); }
+  table.fs td { text-align: right; padding: 5px 3px; border-bottom: 1px solid var(--line); }
+  table.fs th:first-child, table.fs td:first-child { text-align: left; }
+  table.fs tr.hi td { background: var(--surface-2); }
+  .fl { display: inline-grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; background: var(--ink); color: #fff; font-size: 10px; font-weight: 700; margin-right: 4px; }
+  .heat { width: 100%; display: block; }
+  ul.notes li { font-size: 12.5px; color: var(--ink-2); }
+  ul.notes b { color: var(--ink); }
+  .pick-on .leaflet-interactive { cursor: pointer; }
+</style>
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="../../index.html"><span class="brand-mark"></span>a_tools</a>
+  <span class="crumb">/ <b>Facade Sun</b></span>
+  <span class="spacer"></span>
+  <span class="site-pill" id="sitePill" hidden></span>
+</header>
+
+<main class="tool">
+  <aside class="panel">
+    <h1>Facade Sun</h1>
+    <p class="lead">How much direct sun and solar heat each facade of your building gets through the year, with the neighbours casting shadows.</p>
+
+    <div class="group">
+      <p class="group-title"><span class="step">1</span>Building</p>
+      <div class="row">
+        <input id="q" type="text" placeholder="Search a place">
+        <button id="go" class="btn" style="flex:0 0 auto">Go</button>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <button id="draw" class="btn">Draw footprint</button>
+        <button id="pick" class="btn">Pick a mapped building</button>
+      </div>
+      <p class="hint" id="drawHint">Draw: tap the corners on the map, then tap the first corner (or Finish). Pick: tap an existing building.</p>
+      <div class="grid-2" style="margin-top:10px">
+        <div class="field"><label for="h">Height <span class="unit">m</span></label><input id="h" type="number" min="3" max="500" step="0.5" value="15"></div>
+        <div class="field"><label for="defH">Others, if unknown <span class="unit">m</span></label><input id="defH" type="number" min="2" max="200" step="0.5" value="9"></div>
+      </div>
+    </div>
+
+    <div class="group">
+      <p class="group-title"><span class="step">2</span>Weather year</p>
+      <div class="field"><label for="year">Solar radiation from</label><select id="year"></select></div>
+      <button id="run" class="btn primary block" disabled>Analyse facades</button>
+      <p class="hint" id="status">Draw or pick a building first.</p>
+    </div>
+
+    <div class="group" id="resGroup" hidden>
+      <p class="group-title">Result</p>
+      <div class="stats">
+        <div class="stat"><b id="sBest">–</b><span>Sunniest facade</span></div>
+        <div class="stat"><b id="sHot">–</b><span>Most summer heat</span></div>
+        <div class="stat"><b id="sShade">–</b><span>Sun taken by neighbours</span></div>
+        <div class="stat"><b id="sArea">–</b><span>Facade area</span></div>
+      </div>
+      <table class="fs" style="margin-top:12px">
+        <thead><tr><th>Facade</th><th>Faces</th><th>Length</th><th>Sun h/yr</th><th>kWh/m²·yr</th><th>Shaded</th></tr></thead>
+        <tbody id="tbody"></tbody>
+      </table>
+      <p class="hint">Mean of six points on each facade: ground floor and top floor, at both ends and the middle.</p>
+    </div>
+
+    <div class="group" id="monthGroup" hidden>
+      <p class="group-title" id="monthTitle">Solar radiation by month</p>
+      <div id="heat"></div>
+    </div>
+
+    <div class="group" id="notesGroup" hidden>
+      <p class="group-title">Design notes</p>
+      <ul class="notes" id="notes"></ul>
+    </div>
+
+    <div class="group">
+      <div class="row">
+        <button id="svg" class="btn" disabled>Diagram · SVG</button>
+        <button id="csv" class="btn" disabled>Table · CSV</button>
+      </div>
+      <p class="hint">Buildings and heights © OpenStreetMap contributors; heights are often missing, so check the default. Radiation: Open-Meteo, ERA5 reanalysis. Flat roofs, no trees, no balconies or reveals. Early design guidance only.</p>
+    </div>
+  </aside>
+
+  <section class="canvas map">
+    <div id="map" class="fill"></div>
+    <div class="map-legend" id="legend" hidden><b id="legTitle">Solar radiation, kWh/m² a year</b><div class="ramp"></div>
+      <div class="ramp-labels"><span id="lMin">0</span><span id="lMax"></span></div></div>
+  </section>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="../../assets/atools.js"></script>
+<script src="../../assets/lib/sun.js"></script>
+<script src="../../assets/lib/fabric.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+const rad = Math.PI / 180, NEAR = 200;   // metres of neighbours that can cast shadows on the facades
+const STOPS = [[38, 52, 79], [47, 93, 138], [159, 188, 214], [243, 210, 122], [224, 162, 58]];
+const MONTHS = ['J', 'F', 'M', 'A', 'M', 'J', 'J', 'A', 'S', 'O', 'N', 'D'];
+const COMPASS = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW'];
+let site = ATools.getSite() || { lat: 41.0082, lng: 28.9784, name: 'Istanbul' };
+let drawing = false, picking = false, footprint = [], pickedId = null, result = null, mapped = null;
+
+// ---------- Map ----------
+const map = ATools.baseMap('map', [site.lat, site.lng], 18);
+const pickLayer = L.layerGroup().addTo(map), plotLayer = L.layerGroup().addTo(map), draftLayer = L.layerGroup().addTo(map), resLayer = L.layerGroup().addTo(map);
+function setSite(s, save = true) { site = s; if (save) ATools.setSite(s); }
+$('go').onclick = async () => {
+  const q = $('q').value.trim(); if (!q) return;
+  try { const s = await ATools.geocode(q); if (!s) return alert('Place not found.'); map.setView([s.lat, s.lng], 18); setSite(s); mapped = null; pickLayer.clearLayers(); }
+  catch { alert('Search failed. Move the map instead.'); }
+};
+$('q').addEventListener('keydown', e => { if (e.key === 'Enter') $('go').click(); });
+
+const y0 = new Date().getFullYear() - 1;
+for (let y = y0; y >= y0 - 9; y--) $('year').insertAdjacentHTML('beforeend', `<option>${y}</option>`);
+$('year').insertAdjacentHTML('beforeend', '<option value="">None, sun hours only</option>');
+
+// ---------- Building: draw or pick ----------
+function setFootprint(ll, h) {
+  footprint = ll; plotLayer.clearLayers(); clearResult();
+  if (h) $('h').value = Math.round(h * 2) / 2;
+  L.polygon(footprint, { color: '#c8553d', weight: 2, fillColor: '#c8553d', fillOpacity: .35, interactive: false }).addTo(plotLayer);
+  const c = footprint.reduce((a, p) => [a[0] + p[0] / footprint.length, a[1] + p[1] / footprint.length], [0, 0]);
+  setSite({ ...site, lat: c[0], lng: c[1] });
+  $('run').disabled = false; $('status').textContent = 'Ready. Check the height, then analyse.';
+}
+function stopModes() {
+  drawing = picking = false; draftLayer.clearLayers(); map.getContainer().style.cursor = '';
+  map.getContainer().classList.remove('pick-on');
+  $('draw').textContent = footprint.length ? 'Redraw footprint' : 'Draw footprint';
+  $('pick').textContent = 'Pick a mapped building';
+}
+let draft = [];
+function finishDraw() {
+  const pts = draft; stopModes();
+  if (pts.length >= 3) { pickedId = null; setFootprint(pts); }
+}
+$('draw').onclick = () => {
+  if (drawing) return finishDraw();
+  stopModes(); drawing = true; draft = [];
+  $('draw').textContent = 'Finish'; map.getContainer().style.cursor = 'crosshair';
+};
+$('pick').onclick = async () => {
+  if (picking) return stopModes();
+  stopModes(); picking = true; $('pick').textContent = 'Cancel';
+  map.getContainer().classList.add('pick-on');
+  const c = map.getCenter(), at = { lat: c.lat, lng: c.lng };
+  $('status').innerHTML = '<span class="spinner"></span>Loading mapped buildings…';
+  try {
+    const j = await ATFabric.fetchMasses(at, 150);
+    mapped = { at, list: ATFabric.masses(j, at, 150, { defH: +$('defH').value || 9, floorH: 3 }) };
+  } catch (e) { $('status').textContent = ATools.errorText(e, 'buildings') + ' You can draw the footprint instead.'; stopModes(); return; }
+  if (!picking) return;
+  pickLayer.clearLayers();
+  const toLL = ([x, y]) => [at.lat + y / 110540, at.lng + x / (111320 * Math.cos(at.lat * rad))];
+  mapped.list.forEach(m => L.polygon(m.outer.map(toLL), { color: '#1b1b19', weight: 1, fillColor: '#8a8882', fillOpacity: .35 })
+    .on('click', ev => { L.DomEvent.stopPropagation(ev); stopModes(); pickLayer.clearLayers(); setFootprint(m.outer.map(toLL), m.z1);
+      $('status').textContent = `Picked a mapped building, ${m.known ? 'height from OpenStreetMap' : 'height unknown, set to the default'}. Check the height, then analyse.`; })
+    .addTo(pickLayer));
+  $('status').textContent = mapped.list.length ? `${mapped.list.length} buildings shown. Tap yours.` : 'No mapped buildings here. Draw the footprint instead.';
+};
+map.on('click', e => {
+  if (!drawing) return;
+  if (draft.length >= 3) {
+    const a = map.latLngToContainerPoint(draft[0]), b = map.latLngToContainerPoint(e.latlng);
+    if (a.distanceTo(b) < 14) return finishDraw();
+  }
+  draft.push([e.latlng.lat, e.latlng.lng]);
+  draftLayer.clearLayers();
+  L.polyline(draft, { color: '#c8553d', dashArray: '4 4' }).addTo(draftLayer);
+  draft.forEach((q, i) => L.circleMarker(q, { radius: i ? 4 : 6, color: '#c8553d', fillOpacity: 1 }).addTo(draftLayer));
+});
+
+function clearResult() {
+  result = null; resLayer.clearLayers(); $('legend').hidden = true;
+  ['resGroup', 'monthGroup', 'notesGroup'].forEach(id => $(id).hidden = true);
+  $('svg').disabled = $('csv').disabled = true;
+}
+
+// ---------- Geometry ----------
+// Facades: the footprint's edges, counter-clockwise, with near-straight neighbours merged and slivers dropped.
+function facades(ring) {
+  let pts = ring.slice();
+  for (let pass = 0; pass < 3; pass++) {
+    const out = [];
+    for (let i = 0; i < pts.length; i++) {
+      const a = pts[(i - 1 + pts.length) % pts.length], b = pts[i], c = pts[(i + 1) % pts.length];
+      const t1 = Math.atan2(b[1] - a[1], b[0] - a[0]), t2 = Math.atan2(c[1] - b[1], c[0] - b[0]);
+      let d = Math.abs(t2 - t1); if (d > Math.PI) d = 2 * Math.PI - d;
+      const short = Math.hypot(c[0] - b[0], c[1] - b[1]) < 0.8 || Math.hypot(b[0] - a[0], b[1] - a[1]) < 0.8;
+      if (d > 8 * rad && !(short && d < 35 * rad)) out.push(b);
+    }
+    if (out.length < 3 || out.length === pts.length) { if (out.length >= 3) pts = out; break; }
+    pts = out;
+  }
+  return pts.map((p, i) => {
+    const q = pts[(i + 1) % pts.length], dx = q[0] - p[0], dy = q[1] - p[1], len = Math.hypot(dx, dy);
+    const nx = dy / len, ny = -dx / len;   // outward normal of a counter-clockwise ring
+    return { p, q, len, nx, ny, az: (Math.atan2(nx, ny) / rad + 360) % 360 };
+  }).filter(f => f.len >= 1);
+}
+const compass = az => COMPASS[Math.round(az / 22.5) % 16];
+
+// Obstacle edges as a flat array: ax, ay, bx, by, top height.
+function obstacleEdges(list) {
+  const e = [];
+  list.forEach(m => [m.outer, ...(m.holes || [])].forEach(r => r.forEach((p, i) => {
+    const q = r[(i + 1) % r.length]; e.push(p[0], p[1], q[0], q[1], m.z1);
+  })));
+  return new Float64Array(e);
+}
+// Horizon seen from a point: the highest obstruction angle (radians) for each 1° of azimuth in front of the facade.
+function horizon(px, py, z, f, E) {
+  const H = new Float32Array(360);
+  for (let a = 0; a < 360; a++) {
+    const dx = Math.sin(a * rad), dy = Math.cos(a * rad);
+    if (dx * f.nx + dy * f.ny <= 0) continue;
+    let best = 0;
+    for (let k = 0; k < E.length; k += 5) {
+      const ax = E[k] - px, ay = E[k + 1] - py, bx = E[k + 2] - px, by = E[k + 3] - py, h = E[k + 4] - z;
+      if (h <= 0) continue;
+      const ex = bx - ax, ey = by - ay, den = dx * ey - dy * ex;
+      if (Math.abs(den) < 1e-12) continue;
+      const t = (ax * ey - ay * ex) / den, u = (ax * dy - ay * dx) / den;
+      if (t > 0.05 && u >= 0 && u <= 1) { const ang = Math.atan2(h, t); if (ang > best) best = ang; }
+    }
+    H[a] = best;
+  }
+  return H;
+}
+
+// One sun position per hour of the year, at the middle of the hour the weather value covers.
+function sunYear(lat, lng, year) {
+  const t0 = Date.UTC(year, 0, 1), n = ((year % 4 === 0 && year % 100 !== 0) || year % 400 === 0 ? 366 : 365) * 24, out = new Array(n);
+  for (let i = 0; i < n; i++) {
+    const t = t0 + i * 36e5;
+    const s = ATSun.position(new Date(t - 18e5), lat, lng);
+    out[i] = { alt: s.alt, az: s.az, month: new Date(t - 18e5).getUTCMonth() };
+  }
+  return out;
+}
+
+async function fetchRadiation(s, year) {
+  const url = 'https://archive-api.open-meteo.com/v1/archive?' + new URLSearchParams({
+    latitude: s.lat.toFixed(4), longitude: s.lng.toFixed(4), start_date: `${year}-01-01`, end_date: `${year}-12-31`,
+    hourly: 'shortwave_radiation,direct_radiation,diffuse_radiation', timezone: 'GMT'
+  });
+  const j = await ATools.fetchJson(url, {}, 45000);
+  if (!j.hourly || !j.hourly.time || !j.hourly.time.length) throw Object.assign(new Error('empty'), { why: 'No weather data came back for this place and year.' });
+  return j.hourly;
+}
+
+// ---------- Analysis ----------
+async function run() {
+  if (footprint.length < 3) return;
+  stopModes(); pickLayer.clearLayers();
+  const s = { ...site }, H = Math.max(3, +$('h').value || 15), year = $('year').value ? +$('year').value : null;
+  $('run').disabled = true; clearResult();
+  const notes = [];
+
+  $('status').innerHTML = '<span class="spinner"></span>Loading neighbours' + (year ? ' and weather…' : '…');
+  const [mres, wres] = await Promise.allSettled([
+    ATFabric.fetchMasses(s, NEAR).then(j => ATFabric.masses(j, s, NEAR, { defH: +$('defH').value || 9, floorH: 3 })),
+    year ? fetchRadiation(s, year) : Promise.resolve(null)
+  ]);
+  let masses = [];
+  if (mres.status === 'fulfilled') masses = mres.value;
+  else notes.push(ATools.errorText(mres.reason, 'neighbouring buildings') + ' Only your own building is taken into account.');
+  let W = null;
+  if (wres.status === 'fulfilled') W = wres.value;
+  else notes.push(ATools.errorText(wres.reason, 'weather data') + ' Showing sun hours only.');
+
+  $('status').innerHTML = '<span class="spinner"></span>Tracing the sun for every hour of the year…';
+  await new Promise(r => setTimeout(r, 30));
+
+  const own = ATFabric.clean(footprint.map(([la, ln]) => ATFabric.xy(la, ln, s)), true);
+  const ownM = { outer: own, holes: [], z1: H };
+  // Your building replaces any mapped building it overlaps.
+  const nbrs = masses.filter(m => !ATFabric.inside(m.outer.reduce((a, p) => [a[0] + p[0] / m.outer.length, a[1] + p[1] / m.outer.length], [0, 0]), own)
+);
+  const E = obstacleEdges([...nbrs, ownM]);
+  const F = facades(own);
+  const yr = year || y0, sun = sunYear(s.lat, s.lng, yr), nH = sun.length;
+
+  // Weather arrays aligned to the sun hours (ERA5 values are means over the hour before the time stamp).
+  let G, B, D;
+  if (W) { G = W.shortwave_radiation; B = W.direct_radiation; D = W.diffuse_radiation; }
+
+  const zs = H < 4.5 ? [H / 2] : [1.5, H - 1.5];
+  F.forEach((f, fi) => {
+    f.label = String.fromCharCode(65 + fi);
+    const pts = [];
+    for (const t of [1 / 6, 1 / 2, 5 / 6]) for (const z of zs) {
+      const px = f.p[0] + (f.q[0] - f.p[0]) * t + f.nx * 0.05, py = f.p[1] + (f.q[1] - f.p[1]) * t + f.ny * 0.05;
+      const hz = horizon(px, py, z, f, E);
+      let svf = 0, cnt = 0;   // share of the open sky in front, a rough sky view factor
+      for (let a = 0; a < 360; a++) { const c = Math.sin(a * rad) * f.nx + Math.cos(a * rad) * f.ny; if (c > 0) { svf += c * Math.cos(hz[a]); cnt += c; } }
+      pts.push({ z, hz, svf: cnt ? svf / cnt : 1 });
+    }
+    const sunH = new Float64Array(12), possH = new Float64Array(12), kwh = new Float64Array(12), sunZ = zs.map(() => 0);
+    for (let i = 0; i < nH; i++) {
+      const st = sun[i]; if (st.alt <= 0) continue;
+      const cosI = Math.cos(st.alt) * (Math.sin(st.az) * f.nx + Math.cos(st.az) * f.ny);
+      let dni = 0;
+      if (W) { const b = B[i] || 0; dni = st.alt > 3 * rad ? Math.min(1100, b / Math.sin(st.alt)) : 0; }
+      const bin = Math.round(st.az / rad) % 360;
+      let lit = 0;
+      pts.forEach((p, k) => { if (cosI > 0 && st.alt > p.hz[bin]) { lit++; sunZ[zs.indexOf(p.z)]++; } });
+      const share = lit / pts.length;
+      if (cosI > 0) { possH[st.month]++; sunH[st.month] += share; }
+      if (W) {
+        const svf = pts.reduce((a, p) => a + p.svf, 0) / pts.length;
+        kwh[st.month] += (dni * Math.max(0, cosI) * share + (D[i] || 0) * 0.5 * svf + (G[i] || 0) * 0.2 * 0.5) / 1000;
+      }
+    }
+    if (W) for (let i = 0; i < nH; i++) if (sun[i].alt <= 0 && D[i] > 0) kwh[sun[i].month] += (D[i] * 0.5 + (G[i] || 0) * 0.1) / 1000;   // twilight diffuse
+    f.sunM = Array.from(sunH); f.kwhM = W ? Array.from(kwh) : null;
+    f.sunYr = f.sunM.reduce((a, b) => a + b, 0); f.possYr = Array.from(possH).reduce((a, b) => a + b, 0);
+    f.kwhYr = W ? f.kwhM.reduce((a, b) => a + b, 0) : null;
+    f.shaded = f.possYr ? 1 - f.sunYr / f.possYr : 0;
+    f.sunGround = sunZ[0] / 3; f.sunTop = sunZ[zs.length - 1] / 3;
+    f.area = f.len * H;
+  });
+
+  result = { s, H, F, year: W ? yr : null, nbrs: nbrs.length, nb: nbrs, nbFail: mres.status !== 'fulfilled', notes };
+  show(result);
+  $('run').disabled = false;
+  $('status').textContent = `${F.length} facades · ${nbrs.length} neighbouring buildings · every hour of ${yr}.` + (notes.length ? ' ' + notes.join(' ') : '');
+}
+
+// ---------- Show ----------
+const colour = t => {
+  t = Math.max(0, Math.min(1, t));
+  const f = t * (STOPS.length - 1), a = Math.min(STOPS.length - 2, Math.floor(f)), w = f - a;
+  return 'rgb(' + STOPS[a].map((c, i) => Math.round(c + (STOPS[a + 1][i] - c) * w)).join(',') + ')';
+};
+const fmt = (x, d = 0) => x == null ? '–' : x.toLocaleString('en-GB', { maximumFractionDigits: d, minimumFractionDigits: d });
+
+function show(r) {
+  const { s, F } = r, useK = r.year != null, val = f => useK ? f.kwhYr : f.sunYr;
+  const vmax = Math.max(...F.map(val), 1);
+  const toLL = ([x, y]) => [s.lat + y / 110540, s.lng + x / (111320 * Math.cos(s.lat * rad))];
+  resLayer.clearLayers();
+  const span = Math.max(...F.map(f => f.len)), off = Math.max(3, span * 0.15);
+  map.fitBounds(L.latLngBounds(F.map(f => toLL(f.p))).pad(0.6), { maxZoom: 20 });
+  (r.nb || []).forEach(m => L.polygon([m.outer.map(toLL), ...m.holes.map(h => h.map(toLL))],
+    { color: '#1b1b19', weight: .6, fillColor: '#4a4945', fillOpacity: .55, interactive: false }).addTo(resLayer));
+  F.forEach(f => {
+    L.polyline([toLL(f.p), toLL(f.q)], { color: colour(val(f) / vmax), weight: 9, lineCap: 'butt', interactive: false }).addTo(resLayer);
+    const m = [(f.p[0] + f.q[0]) / 2 + f.nx * off, (f.p[1] + f.q[1]) / 2 + f.ny * off];
+    L.marker(toLL(m), { interactive: false, icon: L.divIcon({ className: '', html: `<div class="flabel">${f.label}</div>`, iconSize: [24, 24], iconAnchor: [12, 12] }) }).addTo(resLayer);
+  });
+  $('legTitle').textContent = useK ? `Solar radiation, kWh/m² in ${r.year}` : 'Direct sun, hours a year';
+  $('lMax').textContent = fmt(vmax); $('legend').hidden = false;
+
+  const best = F.reduce((a, f) => val(f) > val(a) ? f : a, F[0]);
+  const summer = f => [5, 6, 7].reduce((a, m) => a + (useK ? f.kwhM[m] : f.sunM[m]), 0) * (s.lat < 0 ? 0 : 1)
+    + [11, 0, 1].reduce((a, m) => a + (useK ? f.kwhM[m] : f.sunM[m]), 0) * (s.lat < 0 ? 1 : 0);
+  const hot = F.reduce((a, f) => summer(f) > summer(a) ? f : a, F[0]);
+  const poss = F.reduce((a, f) => a + f.possYr * f.area, 0), got = F.reduce((a, f) => a + f.sunYr * f.area, 0);
+  $('sBest').textContent = `${best.label} · ${compass(best.az)}`;
+  $('sHot').textContent = `${hot.label} · ${compass(hot.az)}`;
+  $('sShade').textContent = r.nbFail ? '–' : poss ? Math.round(100 * (1 - got / poss)) + '%' : '–';
+  $('sArea').textContent = fmt(F.reduce((a, f) => a + f.area, 0)) + ' m²';
+  $('tbody').innerHTML = F.map(f => `<tr${f === best ? ' class="hi"' : ''}><td><span class="fl">${f.label}</span></td><td>${compass(f.az)} ${Math.round(f.az)}°</td><td>${fmt(f.len, 1)} m</td><td>${fmt(f.sunYr)}</td><td>${useK ? fmt(f.kwhYr) : '–'}</td><td>${Math.round(100 * f.shaded)}%</td></tr>`).join('');
+  $('resGroup').hidden = false;
+
+  $('monthTitle').textContent = useK ? `Solar radiation by month, kWh/m²` : 'Direct sun by month, hours';
+  $('heat').innerHTML = heatSvg(F, useK);
+  $('monthGroup').hidden = false;
+
+  $('notes').innerHTML = designNotes(r).map((n, i) => `<li data-i="${i + 1}"><span>${n}</span></li>`).join('');
+  $('notesGroup').hidden = false;
+  $('svg').disabled = $('csv').disabled = false;
+}
+
+function heatSvg(F, useK) {
+  const cw = 24, rh = 20, lw = 34, W = lw + 12 * cw, Hh = 18 + F.length * rh + 4;
+  const v = f => useK ? f.kwhM : f.sunM, mx = Math.max(...F.flatMap(v), 1);
+  let o = `<svg class="heat" viewBox="0 0 ${W} ${Hh}" font-family="Inter, sans-serif">`;
+  MONTHS.forEach((m, i) => o += `<text x="${lw + i * cw + cw / 2}" y="12" font-size="9" text-anchor="middle" fill="#8a8882">${m}</text>`);
+  F.forEach((f, r) => {
+    const y = 18 + r * rh;
+    o += `<text x="0" y="${y + 14}" font-size="10" font-weight="700" fill="#1b1b19">${f.label}</text><text x="12" y="${y + 14}" font-size="9" fill="#8a8882">${compass(f.az)}</text>`;
+    v(f).forEach((x, i) => {
+      const t = x / mx;
+      o += `<rect x="${lw + i * cw + 1}" y="${y + 1}" width="${cw - 2}" height="${rh - 2}" rx="2" fill="${colour(t)}"><title>${f.label} ${MONTHS[i]}: ${fmt(x)}</title></rect>`;
+      if (cw >= 22) o += `<text x="${lw + i * cw + cw / 2}" y="${y + 13.5}" font-size="8" text-anchor="middle" fill="${t > .45 ? '#1b1b19' : '#fff'}">${fmt(x)}</text>`;
+    });
+  });
+  return o + '</svg>';
+}
+
+function designNotes(r) {
+  const { s, F, H } = r, useK = r.year != null, north = s.lat >= 0, out = [];
+  const eq = north ? 180 : 0, pole = north ? 0 : 180;
+  const angle = (a, b) => { const d = Math.abs(((a - b) % 360 + 540) % 360 - 180); return d; };
+  const Y = r.year || y0;
+  const altS = ATSun.noonAltitude(s.lat, s.lng, Y, north ? 6 : 12, 21), altW = ATSun.noonAltitude(s.lat, s.lng, Y, north ? 12 : 6, 21);
+  const list = l => l.map(f => f.label).join(', ');
+  const sunny = F.filter(f => angle(f.az, eq) <= 35), west = F.filter(f => angle(f.az, 270) <= 35), east = F.filter(f => angle(f.az, 90) <= 35);
+  const shady = F.filter(f => angle(f.az, pole) <= 45);
+  if (sunny.length && altS > 5) {
+    const d = 1.5 / Math.tan(altS * rad), keep = Math.round(100 * (1 - Math.min(1, Math.tan(altW * rad) / Math.tan(altS * rad))));
+    out.push(`<b>${north ? 'South' : 'North'}-facing ${list(sunny)}.</b> High sun in summer, low in winter. An overhang about ${d.toFixed(1)} m deep over a 1.5 m tall window shades it at noon on the summer solstice and still lets about ${keep}% of the window see the winter noon sun.`);
+  }
+  if (west.length) {
+    const f = west[0], k = useK ? `${fmt([5, 6, 7].reduce((a, m) => a + f.kwhM[north ? m : (m + 6) % 12], 0))} kWh/m² in the three summer months` : `${fmt([5, 6, 7].reduce((a, m) => a + f.sunM[north ? m : (m + 6) % 12], 0))} hours of sun in the three summer months`;
+    out.push(`<b>West-facing ${list(west)}.</b> Afternoon sun when the air is hottest: ${k} on ${f.label}. Low sun gets under overhangs, so use vertical fins, deep reveals or external blinds, and keep glazing modest.`);
+  }
+  if (east.length) out.push(`<b>East-facing ${list(east)}.</b> Morning sun, gentler than western sun. Good for bedrooms and breakfast rooms; adjustable shades handle the low angle.`);
+  if (shady.length) {
+    const f = shady[0];
+    out.push(`<b>${north ? 'North' : 'South'}-facing ${list(shady)}.</b> Little direct sun (${fmt(f.sunYr)} h a year on ${f.label}, mostly early mornings and evenings in summer). Even daylight suits studios and workspaces; keep windows sized for daylight to limit winter heat loss.`);
+  }
+  const blocked = F.filter(f => f.shaded > 0.35 && f.possYr > 300).sort((a, b) => b.shaded - a.shaded);
+  if (blocked.length) {
+    const f = blocked[0];
+    out.push(`<b>Neighbours.</b> They take ${Math.round(100 * f.shaded)}% of the sun facade ${f.label} could get. Its ground floor gets ${fmt(f.sunGround)} h a year against ${fmt(f.sunTop)} h at the top: put rooms that need sun higher up, or use light shelves and pale surfaces opposite.`);
+  }
+  const best = F.reduce((a, f) => (useK ? f.kwhYr : f.sunYr) > (useK ? a.kwhYr : a.sunYr) ? f : a, F[0]);
+  if (useK && best.kwhYr > 500) out.push(`<b>Solar facade.</b> ${best.label} collects ${fmt(best.kwhYr)} kWh/m² a year. Facade PV makes roughly 15–20% of that as electricity, so about ${fmt(best.kwhYr * 0.17)} kWh per m² of panel a year before losses.`);
+  if (r.notes.length) out.push(`<b>Data.</b> ${r.notes.join(' ')}`);
+  return out;
+}
+
+// ---------- Exports ----------
+$('run').onclick = run;
+$('csv').onclick = () => {
+  const r = result; if (!r) return;
+  const useK = r.year != null, head = ['facade', 'faces', 'azimuth_deg', 'length_m', 'area_m2', 'sun_h_year', 'possible_h_year', 'shaded_pct', 'kwh_m2_year',
+    ...MONTHS.map((_, i) => 'sun_h_' + (i + 1)), ...(useK ? MONTHS.map((_, i) => 'kwh_m2_' + (i + 1)) : [])];
+  const rows = r.F.map(f => [f.label, compass(f.az), Math.round(f.az), f.len.toFixed(1), f.area.toFixed(0), f.sunYr.toFixed(0), f.possYr.toFixed(0), Math.round(100 * f.shaded),
+    useK ? f.kwhYr.toFixed(0) : '', ...f.sunM.map(x => x.toFixed(0)), ...(useK ? f.kwhM.map(x => x.toFixed(1)) : [])]);
+  ATools.download(`facade-sun-${ATools.slug(r.s.name)}.csv`, [head, ...rows].map(x => x.join(',')).join('\n'), 'text/csv');
+};
+$('svg').onclick = () => {
+  const r = result; if (!r) return;
+  const useK = r.year != null, val = f => useK ? f.kwhYr : f.sunYr, vmax = Math.max(...r.F.map(val), 1);
+  const xs = r.F.flatMap(f => [f.p[0], f.q[0]]), ys = r.F.flatMap(f => [f.p[1], f.q[1]]);
+  const x0 = Math.min(...xs), x1 = Math.max(...xs), y0_ = Math.min(...ys), y1 = Math.max(...ys);
+  const span = Math.max(x1 - x0, y1 - y0_, 10), S = 460 / span, W = 800, Hh = 760, cx = 400, cy = 370;
+  const P = ([x, y]) => [(cx + (x - (x0 + x1) / 2) * S).toFixed(1), (cy - (y - (y0_ + y1) / 2) * S).toFixed(1)];
+  let o = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${Hh}" font-family="Inter, sans-serif"><rect width="${W}" height="${Hh}" fill="#fff"/>`;
+  o += `<text x="40" y="44" font-size="20" font-weight="700" fill="#1b1b19">Facade sun</text><text x="40" y="66" font-size="12" fill="#4a4945">${(r.s.name || '').replace(/[<&]/g, '')} · ${r.H} m tall · ${useK ? 'solar radiation ' + r.year + ', kWh/m²' : 'direct sun, hours a year'}</text>`;
+  o += `<polygon points="${r.F.map(f => P(f.p).join(',')).join(' ')}" fill="#f4f2ed" stroke="#1b1b19" stroke-width="1"/>`;
+  r.F.forEach(f => {
+    const [a, b] = [P(f.p), P(f.q)], mid = [(f.p[0] + f.q[0]) / 2, (f.p[1] + f.q[1]) / 2], lab = P([mid[0] + f.nx * 28 / S, mid[1] + f.ny * 28 / S]);
+    o += `<line x1="${a[0]}" y1="${a[1]}" x2="${b[0]}" y2="${b[1]}" stroke="${colour(val(f) / vmax)}" stroke-width="14"/>`;
+    o += `<circle cx="${lab[0]}" cy="${lab[1]}" r="11" fill="#1b1b19"/><text x="${lab[0]}" y="${+lab[1] + 4}" font-size="12" font-weight="700" fill="#fff" text-anchor="middle">${f.label}</text>`;
+    const vp = P([mid[0] + f.nx * 52 / S, mid[1] + f.ny * 52 / S]);
+    o += `<text x="${vp[0]}" y="${+vp[1] + 4}" font-size="12" font-weight="600" fill="#1b1b19" text-anchor="middle">${fmt(val(f))}</text>`;
+  });
+  o += `<g transform="translate(${W - 70} 110)"><circle r="20" fill="#fff" stroke="#e3e0d8"/><path d="M0 -14 L7 8 L0 3 L-7 8Z" fill="#1b1b19"/><text y="-26" font-size="12" font-weight="600" text-anchor="middle">N</text></g>`;
+  o += `<defs><linearGradient id="rmp">${STOPS.map((c, i) => `<stop offset="${i / 4}" stop-color="rgb(${c})"/>`).join('')}</linearGradient></defs>`;
+  o += `<rect x="40" y="${Hh - 70}" width="240" height="10" rx="3" fill="url(#rmp)"/><text x="40" y="${Hh - 46}" font-size="11" fill="#4a4945">0</text><text x="280" y="${Hh - 46}" font-size="11" fill="#4a4945" text-anchor="end">${fmt(vmax)}</text>`;
+  o += `<text x="40" y="${Hh - 20}" font-size="10" fill="#8a8882">Buildings © OpenStreetMap contributors${useK ? ' · Open-Meteo, ERA5' : ''} · early design guidance · a_tools</text></svg>`;
+  ATools.download(`facade-sun-${ATools.slug(r.s.name)}.svg`, o, 'image/svg+xml');
+};
+</script>
+</body>
+</html>
