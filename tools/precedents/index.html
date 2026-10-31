@@ -1,0 +1,457 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Precedent Finder · a_tools</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="../../assets/atools.css">
+<style>
+  .canvas.res { display: flex; flex-direction: column; overflow: hidden; background: var(--bg); }
+  .resbar { display: flex; align-items: center; gap: 10px; padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--surface); flex-wrap: wrap; }
+  .resbar .count { font-size: 13px; color: var(--ink-2); flex: 1; min-width: 140px; }
+  .resbar select { width: auto; height: 30px; font-size: 12px; }
+  .resbar .seg { width: 150px; }
+  .results { flex: 1; overflow-y: auto; padding: 16px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 14px; }
+  .pc { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; display: flex; flex-direction: column; cursor: pointer; position: relative; }
+  .pc:hover { border-color: #cfccc3; box-shadow: 0 6px 18px rgba(27,27,25,.07); }
+  .pc .ph { aspect-ratio: 4 / 3; background: var(--surface-2); display: grid; place-items: center; color: var(--muted); font-size: 12px; overflow: hidden; }
+  .pc .ph img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .pc .tx { padding: 10px 12px 12px; display: grid; gap: 3px; }
+  .pc h3 { margin: 0; font-size: 14px; line-height: 1.25; }
+  .pc .by { font-size: 12px; color: var(--ink-2); }
+  .pc .mt { font-size: 11.5px; color: var(--muted); }
+  .star { position: absolute; top: 8px; right: 8px; width: 32px; height: 32px; border-radius: 50%; border: 0; background: rgba(255,255,255,.92);
+    display: grid; place-items: center; cursor: pointer; box-shadow: 0 1px 3px rgba(0,0,0,.15); font-size: 16px; color: var(--ink-2); }
+  .star.on { background: var(--accent); color: #fff; }
+  #pmap { flex: 1; }
+  .empty { max-width: 460px; margin: 40px auto; text-align: center; color: var(--ink-2); font-size: 14px; }
+  .empty b { display: block; color: var(--ink); font-size: 16px; margin-bottom: 6px; }
+  .ac { position: relative; }
+  .ac-list { position: absolute; left: 0; right: 0; top: 100%; z-index: 1100; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-sm);
+    box-shadow: 0 8px 24px rgba(0,0,0,.12); margin-top: 2px; max-height: 260px; overflow-y: auto; }
+  .ac-list button { display: block; width: 100%; text-align: left; border: 0; background: none; padding: 7px 10px; font: inherit; font-size: 13px; cursor: pointer; }
+  .ac-list button:hover, .ac-list button:focus { background: var(--surface-2); outline: none; }
+  .ac-list small { display: block; color: var(--muted); font-size: 11.5px; }
+  .pick { display: inline-flex; align-items: center; gap: 6px; margin-top: 6px; background: var(--ink); color: #fff; border-radius: 999px; padding: 3px 4px 3px 10px; font-size: 12px; }
+  .pick button { border: 0; background: rgba(255,255,255,.2); color: #fff; width: 20px; height: 20px; border-radius: 50%; cursor: pointer; line-height: 1; }
+  .pick[hidden] { display: none; }
+  dialog.det { border: 0; border-radius: 14px; padding: 0; width: min(640px, calc(100vw - 24px)); max-height: calc(100vh - 24px); box-shadow: 0 20px 60px rgba(0,0,0,.25); background: var(--surface); color: var(--ink); }
+  dialog.det::backdrop { background: rgba(27,27,25,.4); }
+  .det img { width: 100%; max-height: 380px; object-fit: cover; display: block; background: var(--surface-2); }
+  .det .body { padding: 18px 20px 20px; display: grid; gap: 10px; }
+  .det h2 { margin: 0; font-size: 20px; }
+  .det dl { display: grid; grid-template-columns: 110px 1fr; gap: 4px 10px; margin: 0; font-size: 13px; }
+  .det dt { color: var(--muted); }
+  .det dd { margin: 0; }
+  .det .ext { font-size: 13.5px; color: var(--ink-2); line-height: 1.5; margin: 0; }
+  .det .links { display: flex; flex-wrap: wrap; gap: 8px; }
+  .det .links a { font-size: 12.5px; }
+  .det .credit { font-size: 11px; color: var(--muted); }
+  .blist { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; font-size: 12.5px; }
+  .blist li { display: flex; gap: 6px; align-items: center; }
+  .blist span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .blist button { border: 0; background: none; color: var(--muted); cursor: pointer; font-size: 14px; }
+  #board { display: none; }
+  @media print {
+    @page { size: A3 landscape; margin: 10mm; }
+    html, body { background: #fff !important; }
+    body > *:not(#board) { display: none !important; }
+    #board { display: block; font-family: Inter, sans-serif; color: #1b1b19; }
+    #board .bh { display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 1.5px solid #1b1b19; padding-bottom: 4mm; margin-bottom: 5mm; }
+    #board h1 { margin: 0; font-size: 22pt; }
+    #board .bh p { margin: 0; font-size: 9pt; color: #4a4945; }
+    #board .bg { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5mm; }
+    #board figure { margin: 0; break-inside: avoid; }
+    #board figure img { width: 100%; height: 62mm; object-fit: cover; display: block; background: #eee; }
+    #board figcaption { font-size: 8.5pt; padding-top: 2mm; line-height: 1.35; }
+    #board figcaption b { font-size: 10pt; display: block; }
+    #board .cr { font-size: 6.5pt; color: #8a8882; }
+    #board .bf { margin-top: 5mm; font-size: 7pt; color: #8a8882; }
+  }
+  @media (max-width: 820px) { .canvas.res { min-height: 70vh; } .resbar .seg { width: 130px; } }
+</style>
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="../../index.html"><span class="brand-mark"></span>a_tools</a>
+  <span class="crumb">/ <b>Precedent Finder</b></span>
+  <span class="spacer"></span>
+  <span class="site-pill" id="sitePill" hidden></span>
+</header>
+
+<main class="tool">
+  <aside class="panel">
+    <h1>Precedent Finder</h1>
+    <p class="lead">Find built work by architect, building type, period, style, country or distance from your site. Data and photos from Wikidata and Wikimedia Commons.</p>
+
+    <div class="group">
+      <p class="group-title">Quick start</p>
+      <div class="chips" id="presets">
+        <button class="chip" data-p="near">Near my site</button>
+        <button class="chip" data-p="lib">Libraries since 1990</button>
+        <button class="chip" data-p="mus">Museums since 2000</button>
+        <button class="chip" data-p="house">Houses, 1920–1970</button>
+      </div>
+    </div>
+
+    <div class="group">
+      <p class="group-title"><span class="step">1</span>What</p>
+      <div class="field ac"><label for="arch">Architect</label><input id="arch" type="text" placeholder="e.g. Alvar Aalto, Sedad Hakkı Eldem" autocomplete="off">
+        <div class="pick" id="archPick" hidden><span></span><button type="button" aria-label="Remove">×</button></div></div>
+      <div class="field"><label for="type">Building type</label>
+        <select id="type">
+          <option value="">Any type</option>
+          <option value="Q7075 Q856584">Library</option>
+          <option value="Q33506">Museum</option>
+          <option value="Q1244442 Q3914">School</option>
+          <option value="Q3947 Q3950">House or villa</option>
+          <option value="Q13402009 Q11755880">Housing, apartments</option>
+          <option value="Q1021645">Office building</option>
+          <option value="Q11303">Skyscraper</option>
+          <option value="Q1329623">Cultural centre</option>
+          <option value="Q24354 Q153562 Q1060829">Theatre, opera, concert hall</option>
+          <option value="Q16970">Church</option>
+          <option value="Q32815">Mosque</option>
+          <option value="Q16917">Hospital</option>
+          <option value="Q27686">Hotel</option>
+          <option value="Q55488">Railway station</option>
+          <option value="Q483110">Stadium</option>
+          <option value="Q276173">Pavilion</option>
+          <option value="Q12280">Bridge</option>
+        </select></div>
+      <div class="field ac"><label for="style">Style or movement <span class="unit">optional</span></label><input id="style" type="text" placeholder="e.g. brutalism, modernism" autocomplete="off">
+        <div class="pick" id="stylePick" hidden><span></span><button type="button" aria-label="Remove">×</button></div></div>
+    </div>
+
+    <div class="group">
+      <p class="group-title"><span class="step">2</span>When and where</p>
+      <div class="grid-2">
+        <div class="field"><label for="from">Built from <span class="unit">year</span></label><input id="from" type="number" placeholder="any" min="-3000" max="2100"></div>
+        <div class="field"><label for="to">to <span class="unit">year</span></label><input id="to" type="number" placeholder="any" min="-3000" max="2100"></div>
+      </div>
+      <div class="field ac"><label for="country">Country <span class="unit">optional</span></label><input id="country" type="text" placeholder="e.g. Finland, Türkiye" autocomplete="off">
+        <div class="pick" id="countryPick" hidden><span></span><button type="button" aria-label="Remove">×</button></div></div>
+      <div class="field"><label><input type="checkbox" id="near">Within <input id="km" type="number" min="1" max="500" value="10" style="width:64px;height:28px;display:inline-block"> km of my site</label></div>
+      <div class="field"><label><input type="checkbox" id="photo" checked>Only with a photo</label></div>
+      <div class="field"><label><input type="checkbox" id="needArch" checked>Only with a known architect</label></div>
+      <button id="run" class="btn primary block">Find precedents</button>
+      <p class="hint" id="status"></p>
+    </div>
+
+    <div class="group">
+      <p class="group-title">Your board <span class="unit" id="bCount" style="text-transform:none;letter-spacing:0"></span></p>
+      <p class="hint" id="bHint" style="margin:0 0 8px">Tap ☆ on a result to add it. Up to 9 fit on one A3 board.</p>
+      <ul class="blist" id="blist"></ul>
+      <div class="field" style="margin-top:10px"><label for="bTitle">Board title</label><input id="bTitle" type="text" placeholder="Precedents"></div>
+      <div class="row">
+        <button id="print" class="btn" disabled>A3 board · PDF</button>
+        <button id="csv" class="btn" disabled>List · CSV</button>
+      </div>
+      <p class="hint">Wikidata is written by volunteers: dates and credits can be missing or wrong. Photos keep their own licences; the board prints each credit.</p>
+    </div>
+  </aside>
+
+  <section class="canvas res">
+    <div class="resbar">
+      <span class="count" id="count">Set a filter and press Find.</span>
+      <select id="sort" aria-label="Sort">
+        <option value="known">Best known first</option>
+        <option value="new">Newest first</option>
+        <option value="old">Oldest first</option>
+        <option value="near">Nearest first</option>
+      </select>
+      <div class="seg" id="view"><button data-v="grid" class="on">Grid</button><button data-v="map">Map</button></div>
+    </div>
+    <div class="results" id="results">
+      <div class="empty"><b>Look at what has been built</b>Pick an architect, a building type or a period, or start with one of the quick searches.</div>
+    </div>
+    <div id="pmap" hidden></div>
+  </section>
+</main>
+
+<dialog class="det" id="det"></dialog>
+<div id="board"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="../../assets/atools.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+const WDQS = 'https://query.wikidata.org/sparql', WDAPI = 'https://www.wikidata.org/w/api.php';
+const BKEY = 'atools.board', LIMIT = 150;
+let site = ATools.getSite(), items = [], view = 'grid', pmap = null, mLayer = null;
+const picked = { arch: null, style: null, country: null };
+
+// ---------- Entity search (Wikidata) ----------
+function autocomplete(key) {
+  const inp = $(key), pick = $(key + 'Pick');
+  let list = null, timer = null, seq = 0;
+  const close = () => { if (list) { list.remove(); list = null; } };
+  const set = v => {
+    picked[key] = v; close();
+    pick.hidden = !v; inp.hidden = !!v; inp.value = '';
+    if (v) pick.querySelector('span').textContent = v.label;
+  };
+  pick.querySelector('button').onclick = () => { set(null); inp.focus(); };
+  inp.addEventListener('input', () => {
+    clearTimeout(timer); const q = inp.value.trim();
+    if (q.length < 2) return close();
+    timer = setTimeout(async () => {
+      const my = ++seq;
+      try {
+        const j = await ATools.fetchJson(WDAPI + '?' + new URLSearchParams({ action: 'wbsearchentities', search: q, language: 'en', uselang: 'en', type: 'item', limit: 8, format: 'json', origin: '*' }), {}, 12000);
+        if (my !== seq) return;
+        close(); list = document.createElement('div'); list.className = 'ac-list';
+        (j.search || []).forEach(r => {
+          const b = document.createElement('button'); b.type = 'button';
+          b.innerHTML = `${esc(r.label)}<small>${esc(r.description || r.id)}</small>`;
+          b.onclick = () => set({ id: r.id, label: r.label });
+          list.appendChild(b);
+        });
+        if (!list.children.length) list.innerHTML = '<div class="hint" style="padding:8px 10px;margin:0">No match on Wikidata.</div>';
+        inp.parentNode.appendChild(list);
+      } catch (e) { close(); }
+    }, 300);
+  });
+  inp.addEventListener('keydown', e => { if (e.key === 'Escape') close(); if (e.key === 'ArrowDown' && list && list.querySelector('button')) { e.preventDefault(); list.querySelector('button').focus(); } });
+  document.addEventListener('click', e => { if (!inp.parentNode.contains(e.target)) close(); });
+  return set;
+}
+const setArch = autocomplete('arch'), setStyle = autocomplete('style'), setCountry = autocomplete('country');
+
+// ---------- Query ----------
+function filters() {
+  return {
+    arch: picked.arch, style: picked.style, country: picked.country,
+    type: $('type').value ? $('type').value.split(' ') : null,
+    from: $('from').value === '' ? null : +$('from').value, to: $('to').value === '' ? null : +$('to').value,
+    near: $('near').checked && site ? { lat: site.lat, lng: site.lng, km: Math.max(1, Math.min(500, +$('km').value || 10)) } : null,
+    photo: $('photo').checked, needArch: $('needArch').checked
+  };
+}
+const ALL_TYPES = [...$('type').options].filter(o => o.value).flatMap(o => o.value.split(' '));
+function sparql(f) {
+  const w = [];
+  if (f.arch) w.push(`?b wdt:P84 wd:${f.arch.id} .`);
+  else if (f.needArch) w.push('?b wdt:P84 ?anyArch .');
+  const types = f.type || (!f.arch && !f.needArch && !f.style ? ALL_TYPES : null);   // keep it to buildings
+  if (types) w.push(`VALUES ?ty { ${types.map(q => 'wd:' + q).join(' ')} } ?b wdt:P31/wdt:P279? ?ty .`);
+  if (f.style) w.push(`?b wdt:P149 wd:${f.style.id} .`);
+  if (f.country) w.push(`?b wdt:P17 wd:${f.country.id} .`);
+  if (f.near) w.push(`SERVICE wikibase:around { ?b wdt:P625 ?loc . bd:serviceParam wikibase:center "Point(${f.near.lng.toFixed(5)} ${f.near.lat.toFixed(5)})"^^geo:wktLiteral . bd:serviceParam wikibase:radius "${f.near.km}" . }`);
+  if (f.from != null || f.to != null) {
+    w.push('?b wdt:P571 ?inc0 .');
+    if (f.from != null) w.push(`FILTER(YEAR(?inc0) >= ${Math.round(f.from)})`);
+    if (f.to != null) w.push(`FILTER(YEAR(?inc0) <= ${Math.round(f.to)})`);
+  }
+  if (f.photo) w.push('?b wdt:P18 ?anyImg .');
+  return `SELECT ?b ?sl (SAMPLE(?lab) AS ?name) (SAMPLE(?labm) AS ?nameMul) (SAMPLE(?desc) AS ?d) (SAMPLE(?img) AS ?image) (SAMPLE(?co) AS ?coord)
+  (MIN(?inc) AS ?inception) (GROUP_CONCAT(DISTINCT ?archL; separator="; ") AS ?architects) (SAMPLE(?tyL) AS ?type)
+  (SAMPLE(?cL) AS ?country) (SAMPLE(?stL) AS ?style) (SAMPLE(?art) AS ?article) WHERE {
+  { SELECT DISTINCT ?b ?sl WHERE { ${w.join('\n    ')}
+      ?b wikibase:sitelinks ?sl . } ORDER BY DESC(?sl) LIMIT ${LIMIT} }
+  OPTIONAL { ?b rdfs:label ?lab . FILTER(LANG(?lab) = "en") }
+  OPTIONAL { ?b rdfs:label ?labm . FILTER(LANG(?labm) = "mul") }
+  OPTIONAL { ?b schema:description ?desc . FILTER(LANG(?desc) = "en") }
+  OPTIONAL { ?b wdt:P18 ?img }
+  OPTIONAL { ?b wdt:P625 ?co }
+  OPTIONAL { ?b wdt:P571 ?inc }
+  OPTIONAL { ?b wdt:P84 ?a . ?a rdfs:label ?archL . FILTER(LANG(?archL) = "en") }
+  OPTIONAL { ?b wdt:P31 ?t . ?t rdfs:label ?tyL . FILTER(LANG(?tyL) = "en") }
+  OPTIONAL { ?b wdt:P17 ?c . ?c rdfs:label ?cL . FILTER(LANG(?cL) = "en") }
+  OPTIONAL { ?b wdt:P149 ?st . ?st rdfs:label ?stL . FILTER(LANG(?stL) = "en") }
+  OPTIONAL { ?art schema:about ?b ; schema:isPartOf <https://en.wikipedia.org/> }
+} GROUP BY ?b ?sl ORDER BY DESC(?sl)`;
+}
+
+const v = (r, k) => r[k] ? r[k].value : '';
+function parseRow(r) {
+  const id = v(r, 'b').split('/').pop(), img = v(r, 'image'), co = v(r, 'coord').match(/Point\(([-\d.eE]+) ([-\d.eE]+)\)/);
+  const inc = v(r, 'inception'), y = inc ? parseInt(inc, 10) : NaN;
+  return {
+    id, name: v(r, 'name') || v(r, 'nameMul') || id, desc: v(r, 'd'), links: +v(r, 'sl') || 0,
+    file: img ? decodeURIComponent(img.split('/').pop()) : '', year: Number.isFinite(y) ? y : null,
+    lat: co ? +co[2] : null, lng: co ? +co[1] : null, architects: v(r, 'architects'), type: v(r, 'type'),
+    country: v(r, 'country'), style: v(r, 'style'), article: v(r, 'article')
+  };
+}
+const thumb = (file, w = 480) => file ? `https://commons.wikimedia.org/wiki/Special:FilePath/${encodeURIComponent(file)}?width=${w}` : '';
+const yearText = y => y == null ? '' : y < 0 ? `${-y} BC` : String(y);
+function km(a, b) {
+  if (!a || b.lat == null) return null;
+  const r = Math.PI / 180, dLat = (b.lat - a.lat) * r, dLng = (b.lng - a.lng) * r;
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(a.lat * r) * Math.cos(b.lat * r) * Math.sin(dLng / 2) ** 2;
+  return 12742 * Math.asin(Math.sqrt(h));
+}
+
+async function run() {
+  const f = filters();
+  if (!f.arch && !f.type && !f.style && !f.country && !f.near && f.from == null && f.to == null)
+    return $('status').textContent = 'Pick at least one filter: an architect, a type, a style, a period, a country or your site.';
+  if ($('near').checked && !site) return $('status').textContent = 'Set your site first: open any map tool or the home page and search a place.';
+  $('run').disabled = true; $('status').innerHTML = '<span class="spinner"></span>Searching Wikidata…';
+  try {
+    const j = await ATools.fetchJson(WDQS + '?' + new URLSearchParams({ query: sparql(f), format: 'json' }), { headers: { Accept: 'application/sparql-results+json' } }, 60000);
+    items = (j.results && j.results.bindings || []).map(parseRow);
+    items.forEach(it => it.dist = km(site, it));
+    $('status').textContent = items.length ? `${items.length} found${items.length === LIMIT ? ' (the best known ' + LIMIT + ')' : ''}.` : 'Nothing found. Loosen a filter: wider years, any type, or allow results without a photo.';
+    ATools.track && ATools.track('precedents/search');
+  } catch (e) {
+    items = [];
+    $('status').textContent = ATools.errorText(e, 'results from Wikidata') + ' Fewer filters at once can help.';
+  }
+  $('run').disabled = false;
+  render();
+}
+
+// ---------- Results ----------
+function sorted() {
+  const s = $('sort').value, a = items.slice();
+  if (s === 'new') a.sort((x, y) => (y.year ?? -1e9) - (x.year ?? -1e9));
+  else if (s === 'old') a.sort((x, y) => (x.year ?? 1e9) - (y.year ?? 1e9));
+  else if (s === 'near') a.sort((x, y) => (x.dist ?? 1e9) - (y.dist ?? 1e9));
+  else a.sort((x, y) => y.links - x.links);
+  return a;
+}
+const meta = it => [yearText(it.year), it.type, it.country].filter(Boolean).join(' · ');
+function render() {
+  const a = sorted();
+  $('count').textContent = items.length ? `${items.length} buildings` : 'No results yet.';
+  if (!items.length) {
+    $('results').innerHTML = `<div class="empty"><b>No results</b>${esc($('status').textContent)}</div>`;
+  } else {
+    $('results').innerHTML = `<div class="grid">${a.map(it => `<article class="pc" data-id="${it.id}" tabindex="0">
+      <div class="ph">${it.file ? `<img loading="lazy" src="${thumb(it.file, 420)}" alt="${esc(it.name)}">` : 'No photo'}</div>
+      <div class="tx"><h3>${esc(it.name)}</h3><span class="by">${esc(it.architects || 'Architect unknown')}</span><span class="mt">${esc(meta(it))}${it.dist != null ? ` · ${it.dist < 10 ? it.dist.toFixed(1) : Math.round(it.dist)} km away` : ''}</span></div>
+      <button class="star${inBoard(it.id) ? ' on' : ''}" data-star="${it.id}" aria-label="Add to board" title="Add to board">${inBoard(it.id) ? '★' : '☆'}</button>
+    </article>`).join('')}</div>`;
+  }
+  if (view === 'map') drawMap();
+}
+$('results').addEventListener('click', e => {
+  const st = e.target.closest('[data-star]');
+  if (st) { e.stopPropagation(); toggleBoard(items.find(i => i.id === st.dataset.star)); return; }
+  const c = e.target.closest('.pc'); if (c) detail(items.find(i => i.id === c.dataset.id));
+});
+$('results').addEventListener('keydown', e => { if (e.key === 'Enter' && e.target.classList.contains('pc')) detail(items.find(i => i.id === e.target.dataset.id)); });
+$('sort').onchange = render;
+document.querySelectorAll('#view button').forEach(b => b.onclick = () => {
+  view = b.dataset.v; document.querySelectorAll('#view button').forEach(x => x.classList.toggle('on', x === b));
+  $('results').hidden = view !== 'grid'; $('pmap').hidden = view !== 'map';
+  if (view === 'map') drawMap();
+});
+function drawMap() {
+  if (!pmap) { pmap = ATools.baseMap('pmap', site ? [site.lat, site.lng] : [41, 29], 4); mLayer = L.featureGroup().addTo(pmap); }
+  setTimeout(() => pmap.invalidateSize(), 0);
+  mLayer.clearLayers();
+  if (site) L.circleMarker([site.lat, site.lng], { radius: 7, color: '#fff', weight: 2, fillColor: '#c8553d', fillOpacity: 1 }).bindTooltip('Your site').addTo(mLayer);
+  items.filter(i => i.lat != null).forEach(it => L.circleMarker([it.lat, it.lng], { radius: 6, color: '#fff', weight: 1.5, fillColor: '#1b1b19', fillOpacity: .9 })
+    .bindTooltip(esc(it.name)).on('click', () => detail(it)).addTo(mLayer));
+  if (mLayer.getLayers().length) pmap.fitBounds(mLayer.getBounds().pad(0.15), { maxZoom: 14 });
+}
+
+// ---------- Detail ----------
+async function detail(it) {
+  if (!it) return;
+  const d = $('det'), osm = it.lat != null ? `https://www.openstreetmap.org/?mlat=${it.lat}&mlon=${it.lng}#map=17/${it.lat}/${it.lng}` : '';
+  d.innerHTML = `${it.file ? `<img src="${thumb(it.file, 1000)}" alt="${esc(it.name)}">` : ''}
+    <div class="body"><h2>${esc(it.name)}</h2>${it.desc ? `<p class="ext" style="margin:0">${esc(it.desc)}</p>` : ''}
+    <dl>${[['Architect', it.architects], ['Built', yearText(it.year)], ['Type', it.type], ['Style', it.style], ['Country', it.country],
+      ['From your site', it.dist != null ? (it.dist < 10 ? it.dist.toFixed(1) : Math.round(it.dist)) + ' km' : '']]
+      .filter(x => x[1]).map(([k, x]) => `<dt>${k}</dt><dd>${esc(x)}</dd>`).join('')}</dl>
+    <p class="ext" id="extract"></p>
+    <div class="links">${it.article ? `<a href="${esc(it.article)}" target="_blank" rel="noopener">Wikipedia</a>` : ''}<a href="https://www.wikidata.org/wiki/${it.id}" target="_blank" rel="noopener">Wikidata</a>
+      ${it.file ? `<a href="https://commons.wikimedia.org/wiki/File:${encodeURIComponent(it.file)}" target="_blank" rel="noopener">Photo and licence</a>` : ''}${osm ? `<a href="${osm}" target="_blank" rel="noopener">Map</a>` : ''}</div>
+    <p class="credit" id="credit"></p>
+    <div class="row"><button class="btn" id="dStar">${inBoard(it.id) ? 'Remove from board' : 'Add to board'}</button><button class="btn primary" id="dClose">Close</button></div></div>`;
+  d.showModal();
+  $('dClose').onclick = () => d.close();
+  $('dStar').onclick = () => { toggleBoard(it); $('dStar').textContent = inBoard(it.id) ? 'Remove from board' : 'Add to board'; };
+  if (it.article) {
+    try {
+      const j = await ATools.fetchJson('https://en.wikipedia.org/api/rest_v1/page/summary/' + it.article.split('/wiki/').pop(), {}, 10000);
+      if (d.open && j.extract) $('extract').textContent = j.extract;
+    } catch (e) {}
+  }
+  if (it.file) { const c = await credit(it.file); if (d.open && c) $('credit').textContent = 'Photo: ' + c; }
+}
+const d0 = $('det'); d0.addEventListener('click', e => { if (e.target === d0) d0.close(); });
+
+// Photo credit and licence from Wikimedia Commons.
+const credits = {};
+async function credit(file) {
+  if (file in credits) return credits[file];
+  try {
+    const j = await ATools.fetchJson('https://commons.wikimedia.org/w/api.php?' + new URLSearchParams({ action: 'query', titles: 'File:' + file, prop: 'imageinfo', iiprop: 'extmetadata', format: 'json', origin: '*' }), {}, 8000);
+    const p = Object.values(j.query.pages)[0], m = (p.imageinfo && p.imageinfo[0].extmetadata) || {};
+    const strip = h => { const t = document.createElement('div'); t.innerHTML = h || ''; return t.textContent.trim().replace(/\s+/g, ' '); };
+    const who = strip(m.Artist && m.Artist.value).slice(0, 80), lic = strip(m.LicenseShortName && m.LicenseShortName.value);
+    return credits[file] = [who, lic, 'Wikimedia Commons'].filter(Boolean).join(' · ');
+  } catch (e) { return credits[file] = 'Wikimedia Commons'; }
+}
+
+// ---------- Board ----------
+function board() { try { return JSON.parse(localStorage.getItem(BKEY)) || []; } catch (e) { return []; } }
+function saveBoard(b) { try { localStorage.setItem(BKEY, JSON.stringify(b)); } catch (e) {} drawBoard(); }
+const inBoard = id => board().some(b => b.id === id);
+function toggleBoard(it) {
+  if (!it) return;
+  const b = board(), i = b.findIndex(x => x.id === it.id);
+  if (i >= 0) b.splice(i, 1); else b.push({ id: it.id, name: it.name, architects: it.architects, year: it.year, type: it.type, country: it.country, file: it.file, lat: it.lat, lng: it.lng, article: it.article });
+  saveBoard(b);
+  document.querySelectorAll(`[data-star="${it.id}"]`).forEach(s => { const on = i < 0; s.classList.toggle('on', on); s.textContent = on ? '★' : '☆'; });
+}
+function drawBoard() {
+  const b = board();
+  $('bCount').textContent = b.length ? `· ${b.length}` : '';
+  $('blist').innerHTML = b.map(x => `<li><span>${esc(x.name)}${x.year != null ? ' · ' + esc(yearText(x.year)) : ''}</span><button data-rm="${x.id}" aria-label="Remove">×</button></li>`).join('');
+  $('print').disabled = $('csv').disabled = !b.length;
+  $('bHint').hidden = b.length > 0;
+}
+$('blist').addEventListener('click', e => {
+  const r = e.target.closest('[data-rm]'); if (!r) return;
+  saveBoard(board().filter(x => x.id !== r.dataset.rm));
+  document.querySelectorAll(`[data-star="${r.dataset.rm}"]`).forEach(s => { s.classList.remove('on'); s.textContent = '☆'; });
+});
+$('csv').onclick = () => {
+  const q = s => `"${String(s == null ? '' : s).replace(/"/g, '""')}"`;
+  const rows = [['name', 'architects', 'year', 'type', 'country', 'lat', 'lng', 'wikidata', 'wikipedia', 'photo']].concat(board().map(x =>
+    [x.name, x.architects, yearText(x.year), x.type, x.country, x.lat, x.lng, 'https://www.wikidata.org/wiki/' + x.id, x.article, x.file ? 'https://commons.wikimedia.org/wiki/File:' + encodeURIComponent(x.file) : '']));
+  ATools.download('precedents.csv', rows.map(r => r.map(q).join(',')).join('\n'), 'text/csv');
+};
+$('print').onclick = async () => {
+  const b = board().slice(0, 9);
+  $('print').disabled = true; $('status').innerHTML = '<span class="spinner"></span>Preparing the board and photo credits…';
+  const cr = await Promise.all(b.map(x => x.file ? credit(x.file) : ''));
+  const title = $('bTitle').value.trim() || 'Precedents';
+  $('board').innerHTML = `<div class="bh"><div><h1>${esc(title)}</h1><p>${b.length} precedent${b.length === 1 ? '' : 's'}${site && site.name ? ' · for ' + esc(site.name) : ''}</p></div><p>a_tools · ${new Date().toISOString().slice(0, 10)}</p></div>
+    <div class="bg">${b.map((x, i) => `<figure>${x.file ? `<img src="${thumb(x.file, 900)}" alt="">` : '<div style="height:62mm;background:#eee"></div>'}
+      <figcaption><b>${esc(x.name)}</b>${esc([x.architects, yearText(x.year), x.country].filter(Boolean).join(' · '))}${cr[i] ? `<div class="cr">Photo: ${esc(cr[i])}</div>` : ''}</figcaption></figure>`).join('')}</div>
+    <p class="bf">Data: Wikidata (CC0). Photos: Wikimedia Commons, each under its own licence as credited. Made with a_tools.</p>`;
+  const imgs = [...$('board').querySelectorAll('img')];
+  await Promise.race([Promise.all(imgs.map(im => im.complete ? 0 : new Promise(r => { im.onload = im.onerror = r; }))), new Promise(r => setTimeout(r, 8000))]);
+  $('status').textContent = ''; $('print').disabled = false;
+  window.print();
+};
+drawBoard();
+
+// ---------- Presets ----------
+function reset() { setArch(null); setStyle(null); setCountry(null); $('type').value = ''; $('from').value = ''; $('to').value = ''; $('near').checked = false; $('photo').checked = true; $('needArch').checked = true; }
+document.querySelectorAll('#presets .chip').forEach(c => c.onclick = () => {
+  reset();
+  const p = c.dataset.p;
+  if (p === 'near') { $('near').checked = true; $('km').value = 10; }
+  if (p === 'lib') { $('type').value = 'Q7075 Q856584'; $('from').value = 1990; }
+  if (p === 'mus') { $('type').value = 'Q33506'; $('from').value = 2000; }
+  if (p === 'house') { $('type').value = 'Q3947 Q3950'; $('from').value = 1920; $('to').value = 1970; }
+  run();
+});
+$('run').onclick = run;
+if (!site) $('near').disabled = true;
+</script>
+</body>
+</html>

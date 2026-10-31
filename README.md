@@ -16,6 +16,7 @@ Free, browser-based design tools for architects and architecture students.
 | 3D Context | Prototype | [`tools/context-3d/`](tools/context-3d/index.html) |
 | Sun Hours | Prototype | [`tools/sun-hours/`](tools/sun-hours/index.html) |
 | Facade Sun | Prototype | [`tools/facade-sun/`](tools/facade-sun/index.html) |
+| Precedent Finder | Prototype | [`tools/precedents/`](tools/precedents/index.html) |
 | Programme & Adjacency | Experimental, not linked from the hub | [`tools/programme/`](tools/programme/index.html) |
 
 ### Sun & Shadow Study
@@ -59,6 +60,10 @@ Hours of direct sun on the ground (1 m grid, sun every 10 minutes) for any day, 
 ### Facade Sun
 
 Draw a footprint or pick a mapped building. Each facade (footprint edge, near-straight edges merged) gets six sample points (both ends and the middle, ground and top floor). For each point a 1° horizon profile is ray-cast against OSM neighbours within 200 m and the building itself; then every hour of a year is checked: the sun must be up, in front of the facade and above that horizon. Solar radiation on the vertical surface comes from Open-Meteo ERA5 hourly direct and diffuse radiation (direct × cos incidence, half the diffuse sky reduced by obstructions, ground reflection 0.2). Outputs: sun hours and kWh/m² per facade and month, share taken by neighbours, orientation-based shading notes (overhang depth for the equator-facing side), SVG plan diagram and CSV.
+
+### Precedent Finder
+
+Searches Wikidata (SPARQL at query.wikidata.org) for buildings by architect (P84), building type (P31, one subclass level), style (P149), country (P17), inception year (P571) and distance from the site (`wikibase:around` on P625). By default only items with a photo (P18) and a known architect. The best known 150 (by sitelink count) come back as cards with Commons thumbnails, a map view and a detail view with the English Wikipedia summary and the photo's author and licence from the Commons API. Starred items form a board kept in the browser, printed as one A3 sheet (up to 9, each photo credited) or exported as CSV. Architect, style and country fields use `wbsearchentities` suggestions.
 
 ### Programme & Adjacency
 
