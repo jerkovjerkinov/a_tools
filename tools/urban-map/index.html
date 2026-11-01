@@ -1,0 +1,431 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Urban Analysis Map · a_tools</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="../../assets/atools.css">
+<style>
+  .canvas.um { display: flex; flex-direction: column; overflow: hidden; }
+  .umbar { display: flex; align-items: center; gap: 10px; padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--surface); flex-wrap: wrap; }
+  .umbar .seg { flex: 1; min-width: 280px; max-width: 640px; }
+  .umbar .seg button[disabled] { opacity: .45; cursor: default; }
+  #map { flex: 1; min-height: 300px; }
+  .sheetwrap { flex: 1; overflow: auto; padding: 16px; background: var(--bg); }
+  .sheetwrap[hidden], #map[hidden] { display: none; }
+  .sheetwrap svg { display: block; width: 100%; max-width: 1400px; height: auto; margin: 0 auto; background: #fff; box-shadow: 0 2px 12px rgba(0,0,0,.08); }
+  table.cnt { width: 100%; border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; }
+  table.cnt td { padding: 4px 3px; border-bottom: 1px solid var(--line); }
+  table.cnt td:not(:first-child) { text-align: right; }
+  .sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; }
+  #printArea { display: none; }
+  @media print {
+    @page { size: A3 landscape; margin: 0; }
+    html, body { background: #fff !important; }
+    body > *:not(#printArea) { display: none !important; }
+    #printArea { display: block; }
+    #printArea svg { display: block; width: 420mm; height: 297mm; page-break-after: always; }
+  }
+</style>
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="../../index.html"><span class="brand-mark"></span>a_tools</a>
+  <span class="crumb">/ <b>Urban Analysis Map</b></span>
+  <span class="spacer"></span>
+  <span class="site-pill" id="sitePill" hidden></span>
+</header>
+
+<main class="tool">
+  <aside class="panel">
+    <h1>Urban Analysis Map</h1>
+    <p class="lead">Four analysis sheets for the same frame: land use, transport, open space and landmarks. Each prints on A3 at a true scale, with a legend and counts.</p>
+
+    <div class="group">
+      <p class="group-title"><span class="step">1</span>Frame</p>
+      <div class="row">
+        <input id="q" type="text" placeholder="Search a place">
+        <button id="go" class="btn" style="flex:0 0 auto">Go</button>
+      </div>
+      <p class="hint">The dashed rectangle is what the A3 sheet shows. Tap the map to move it.</p>
+      <div class="field" style="margin-top:10px"><span class="label">Scale on A3</span>
+        <div class="seg" id="scale"><button data-s="1000" class="on">1:1000</button><button data-s="2000">1:2000</button><button data-s="5000">1:5000</button></div>
+      </div>
+      <div class="field"><label for="title">Sheet title</label><input id="title" type="text" placeholder="e.g. Kadıköy waterfront"></div>
+      <button id="run" class="btn primary block">Make the sheets</button>
+      <p class="hint" id="status"></p>
+    </div>
+
+    <div class="group" id="cntGroup" hidden>
+      <p class="group-title" id="cntTitle">Counts</p>
+      <table class="cnt" id="cnt"></table>
+    </div>
+
+    <div class="group">
+      <div class="row">
+        <button id="svg" class="btn" disabled>Sheet · SVG</button>
+        <button id="csv" class="btn" disabled>Counts · CSV</button>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <button id="print1" class="btn" disabled>This sheet · PDF</button>
+        <button id="printAll" class="btn" disabled>All 4 · PDF</button>
+      </div>
+      <p class="hint">Data © OpenStreetMap contributors. What is not mapped in OSM is missing here, so walk the site and correct the drawing. Road class stands in for traffic: count traffic on site for real numbers. In the print dialog choose A3 landscape, no margins, 100% scale.</p>
+    </div>
+  </aside>
+
+  <section class="canvas um">
+    <div class="umbar">
+      <div class="seg" id="tabs">
+        <button data-t="map" class="on">Map</button>
+        <button data-t="landuse" disabled>Land use</button>
+        <button data-t="transport" disabled>Transport</button>
+        <button data-t="open" disabled>Open space</button>
+        <button data-t="landmarks" disabled>Landmarks</button>
+      </div>
+    </div>
+    <div id="map"></div>
+    <div class="sheetwrap" id="sheet" hidden></div>
+  </section>
+</main>
+<div id="printArea"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="../../assets/atools.js"></script>
+<script src="../../assets/lib/fabric.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+const rad = Math.PI / 180;
+// A3 landscape layout in mm: map frame on the left, legend column on the right.
+const PAGE = { w: 420, h: 297, mx: 12, my: 12, mapW: 300, mapH: 256, colX: 322 };
+let site = ATools.getSite() || { lat: 41.0082, lng: 28.9784, name: 'Istanbul' };
+let S = 1000, data = null, tab = 'map';
+const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+const fmt = (x, d = 0) => Number(x).toLocaleString('en-GB', { maximumFractionDigits: d, minimumFractionDigits: d });
+
+// ---------- Frame on the map ----------
+const map = ATools.baseMap('map', [site.lat, site.lng], 16);
+const frame = L.rectangle([[0, 0], [0, 0]], { color: '#1b1b19', weight: 1.5, fill: false, dashArray: '6 5', interactive: false }).addTo(map);
+const extent = () => ({ w: PAGE.mapW * S / 1000, h: PAGE.mapH * S / 1000 });   // metres
+function drawFrame(fit) {
+  const { w, h } = extent(), dLat = h / 2 / 110540, dLng = w / 2 / (111320 * Math.cos(site.lat * rad));
+  const b = [[site.lat - dLat, site.lng - dLng], [site.lat + dLat, site.lng + dLng]];
+  frame.setBounds(b); if (fit) map.fitBounds(b, { padding: [30, 30] });
+}
+drawFrame(true);
+map.on('click', e => { if (tab !== 'map') return; site = { lat: e.latlng.lat, lng: e.latlng.lng, name: site.name }; ATools.setSite(site); drawFrame(); });
+$('go').onclick = async () => {
+  const q = $('q').value.trim(); if (!q) return;
+  try { const s = await ATools.geocode(q); if (!s) return alert('Place not found.'); site = s; ATools.setSite(s); drawFrame(true); }
+  catch { alert('Search failed. Tap the map instead.'); }
+};
+$('q').addEventListener('keydown', e => { if (e.key === 'Enter') $('go').click(); });
+document.querySelectorAll('#scale button').forEach(b => b.onclick = () => {
+  document.querySelectorAll('#scale button').forEach(x => x.classList.toggle('on', x === b));
+  S = +b.dataset.s; drawFrame(true);
+});
+document.querySelectorAll('#tabs button').forEach(b => b.onclick = () => { if (!b.disabled) showTab(b.dataset.t); });
+function showTab(t) {
+  tab = t;
+  document.querySelectorAll('#tabs button').forEach(x => x.classList.toggle('on', x.dataset.t === t));
+  $('map').hidden = t !== 'map'; $('sheet').hidden = t === 'map';
+  if (t === 'map') { setTimeout(() => map.invalidateSize(), 0); $('cntGroup').hidden = true; }
+  else { $('sheet').innerHTML = sheetSvg(t); counts(t); }
+  ['svg', 'csv', 'print1'].forEach(id => $(id).disabled = t === 'map' || !data);
+}
+
+// ---------- Classification ----------
+const LU = [
+  ['residential', 'Residential', '#f3d27a'], ['mixed', 'Residential with shops', '#eba45e'], ['commercial', 'Commercial, retail, food', '#d9604c'],
+  ['office', 'Office', '#c27ba0'], ['education', 'Education', '#5b8fd6'], ['health', 'Health', '#86b8e3'], ['religious', 'Religious', '#8e6fc1'],
+  ['civic', 'Public, civic, culture', '#2f5d8a'], ['hotel', 'Hotel, tourism', '#e58ab2'], ['industrial', 'Industrial, storage', '#9b8b7a'],
+  ['transport', 'Transport, parking', '#8a8882'], ['sport', 'Sport', '#6fa36b'], ['unknown', 'Not tagged', '#dcd9d0']
+];
+const LUC = Object.fromEntries(LU.map(([k, , c]) => [k, c])), LUN = Object.fromEntries(LU.map(([k, n]) => [k, n]));
+const RES = /^(house|residential|apartments|detached|semidetached_house|terrace|dormitory|bungalow|farm|cabin)$/;
+function classify(t) {
+  const b = t.building || '', a = t.amenity || '';
+  if (/^(school|university|college|kindergarten)$/.test(b) || /^(school|university|college|kindergarten)$/.test(a)) return 'education';
+  if (b === 'hospital' || /^(hospital|clinic|doctors)$/.test(a)) return 'health';
+  if (/^(mosque|church|chapel|cathedral|synagogue|temple|religious|shrine)$/.test(b) || a === 'place_of_worship') return 'religious';
+  if (/^(public|civic|government|townhall|museum|library)$/.test(b) || /^(townhall|courthouse|police|fire_station|library|theatre|cinema|arts_centre|community_centre|post_office|social_facility)$/.test(a) || t.tourism === 'museum' || t.office === 'government') return 'civic';
+  if (b === 'hotel' || /^(hotel|hostel|guest_house|motel)$/.test(t.tourism || '')) return 'hotel';
+  if (/^(industrial|warehouse|factory|manufacture|storage_tank|hangar)$/.test(b)) return 'industrial';
+  if (/^(train_station|transportation|parking|garage|garages)$/.test(b) || /^(parking|bus_station|ferry_terminal)$/.test(a)) return 'transport';
+  if (/^(sports_hall|stadium|sports_centre)$/.test(b) || /^(sports_centre|stadium)$/.test(t.leisure || '')) return 'sport';
+  if (b === 'office' || t.office) return 'office';
+  if (/^(commercial|retail|kiosk|supermarket|shop)$/.test(b) || t.shop || /^(restaurant|cafe|bar|fast_food|marketplace|bank|pub)$/.test(a)) return RES.test(b) ? 'mixed' : 'commercial';
+  if (RES.test(b)) return 'residential';
+  return 'unknown';
+}
+const POI_COM = t => t.shop || /^(restaurant|cafe|bar|fast_food|bank|pharmacy|pub)$/.test(t.amenity || '') || t.office;
+
+// ---------- Data ----------
+async function run() {
+  const { w, h } = extent(), o = { ...site }, pad = 1.05;
+  const dLat = h / 2 * pad / 110540, dLng = w / 2 * pad / (111320 * Math.cos(o.lat * rad));
+  const bb = [o.lat - dLat, o.lng - dLng, o.lat + dLat, o.lng + dLng].map(x => x.toFixed(6)).join(',');
+  const q = `[out:json][timeout:120][bbox:${bb}];
+    (nwr["building"];way["highway"];way["railway"~"^(rail|tram|subway|light_rail|narrow_gauge)$"];
+     node["highway"="bus_stop"];node["public_transport"];node["railway"~"^(station|halt|tram_stop|subway_entrance)$"];nwr["amenity"~"^(ferry_terminal|bus_station)$"];
+     nwr["landuse"];nwr["leisure"];nwr["natural"~"^(water|wood|scrub|grassland|beach|tree|tree_row)$"];nwr["place"="square"];nwr["waterway"="riverbank"];
+     nwr["historic"];nwr["heritage"];nwr["tourism"~"^(attraction|museum|viewpoint|artwork|gallery)$"];nwr["man_made"~"^(tower|lighthouse)$"];
+     node["amenity"];node["shop"];node["office"];); out geom;`;
+  $('run').disabled = true; $('status').innerHTML = '<span class="spinner"></span>Loading OpenStreetMap data…';
+  try {
+    const j = await ATools.overpass(q, 120000);
+    $('status').innerHTML = '<span class="spinner"></span>Classifying…';
+    await new Promise(r => setTimeout(r, 20));
+    data = build(j, o, w, h);
+    if (!data.buildings.length && !data.roads.length) { data = null; showTab('map'); document.querySelectorAll('#tabs button').forEach(b => b.disabled = b.dataset.t !== 'map'); $('printAll').disabled = true; $('status').textContent = 'Nothing is mapped in OpenStreetMap inside this frame. Move the frame or pick a larger scale.'; $('run').disabled = false; return; }
+    $('status').textContent = `${fmt(data.buildings.length)} buildings, ${fmt(data.roads.length)} street segments, ${fmt(data.stops.length)} stops, ${data.marks.length} landmarks.`;
+    document.querySelectorAll('#tabs button').forEach(b => b.disabled = false);
+    $('printAll').disabled = false;
+    ATools.track && ATools.track('urban-map/make');
+    showTab('landuse');
+  } catch (e) {
+    $('status').textContent = ATools.errorText(e, 'map data', S >= 5000);
+  }
+  $('run').disabled = false;
+}
+
+function build(j, o, w, h) {
+  const P = g => ATFabric.xy(g.lat, g.lon, o);
+  const rings = el => el.type === 'way' ? (el.geometry ? [el.geometry.map(P)] : []) : (el.members || []).filter(m => m.geometry && m.geometry.length > 2).map(m => m.geometry.map(P));
+  const centre = el => el.type === 'node' ? P(el) : (() => { const r = rings(el)[0] || []; return r.length ? r.reduce((a, p) => [a[0] + p[0] / r.length, a[1] + p[1] / r.length], [0, 0]) : null; })();
+  const inFrame = p => p && Math.abs(p[0]) <= w / 2 && Math.abs(p[1]) <= h / 2;
+  const D = { o, w, h, buildings: [], landuse: [], green: [], water: [], squares: [], roads: [], rails: [], stops: [], trees: [], marks: [], pois: [] };
+  j.elements.forEach(el => {
+    const t = el.tags || {};
+    if (el.type === 'node') {
+      const p = P(el);
+      if (t.highway === 'bus_stop' || t.public_transport === 'platform' || t.public_transport === 'stop_position' || /^(station|halt|tram_stop|subway_entrance)$/.test(t.railway || '') || /^(ferry_terminal|bus_station)$/.test(t.amenity || '')) {
+        const kind = /ferry/.test(t.amenity || '') || t.ferry === 'yes' ? 'ferry' : t.railway === 'subway_entrance' || t.subway === 'yes' || t.station === 'subway' ? 'metro'
+          : t.railway === 'tram_stop' || t.tram === 'yes' ? 'tram' : /station|halt/.test(t.railway || '') || t.train === 'yes' ? 'rail' : t.share_taxi === 'yes' || /dolmu/i.test(t.name || '') ? 'dolmus' : 'bus';
+        if (t.public_transport === 'stop_position' && kind === 'bus') return;   // the platform is enough for buses
+        D.stops.push({ p, kind, name: t.name || '' });
+      }
+      if (t.natural === 'tree') D.trees.push(p);
+      if (POI_COM(t) || t.amenity) D.pois.push({ p, t });
+    }
+    if (t.building) { rings(el).forEach((r, i) => i === 0 && D.buildings.push({ r: rings(el), t, c: centre(el) })); }
+    else if (t.highway && el.type === 'way' && el.geometry) {
+      if (t.area === 'yes' && t.highway === 'pedestrian') D.squares.push({ r: rings(el), t });
+      else D.roads.push({ line: el.geometry.map(P), k: t.highway, t });
+    }
+    else if (t.railway && el.type === 'way' && el.geometry) D.rails.push({ line: el.geometry.map(P), k: t.railway });
+    else if (t.place === 'square') { if (el.type !== 'node') D.squares.push({ r: rings(el), t }); }
+    else if (t.natural === 'water' || t.waterway === 'riverbank' || t.landuse === 'reservoir' || t.landuse === 'basin') D.water.push({ r: rings(el), t });
+    else if (/^(park|garden|playground|pitch|nature_reserve|common|dog_park|recreation_ground)$/.test(t.leisure || '') || /^(grass|forest|recreation_ground|cemetery|meadow|village_green|allotments)$/.test(t.landuse || '') || /^(wood|scrub|grassland|beach)$/.test(t.natural || '')) D.green.push({ r: rings(el), t, kind: t.leisure || t.landuse || t.natural });
+    else if (t.landuse) D.landuse.push({ r: rings(el), t, kind: t.landuse });
+    if (t.natural === 'tree_row' && el.geometry) el.geometry.forEach((g, i) => i % 2 || D.trees.push(P(g)));
+    if ((t.historic || t.heritage || /^(attraction|museum|viewpoint|artwork|gallery)$/.test(t.tourism || '') || /^(tower|lighthouse)$/.test(t.man_made || '')) && t.name) {
+      const c = centre(el); if (inFrame(c)) D.marks.push({ p: c, name: t.name, kind: t.historic ? 'Historic ' + t.historic.replace(/_/g, ' ') : t.heritage ? 'Listed' : t.tourism ? t.tourism.replace(/_/g, ' ') : t.man_made, listed: !!(t.heritage || t['heritage:operator']), wd: t.wikidata || '' });
+    }
+  });
+  // Buildings: class from their own tags, then shops inside a residential building make it mixed, then landuse below fills the gaps.
+  const resLU = D.landuse.filter(l => l.kind === 'residential'), indLU = D.landuse.filter(l => /industrial|railway|port/.test(l.kind)), comLU = D.landuse.filter(l => /commercial|retail/.test(l.kind));
+  const inAny = (p, list) => list.some(l => l.r.some(r => ATFabric.inside(p, r)));
+  const bb = D.buildings.map(b => { const xs = b.r[0].map(p => p[0]), ys = b.r[0].map(p => p[1]); return [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)]; });
+  D.pois.filter(x => POI_COM(x.t)).forEach(x => {
+    for (let i = 0; i < D.buildings.length; i++) {
+      const q = bb[i]; if (x.p[0] < q[0] || x.p[0] > q[2] || x.p[1] < q[1] || x.p[1] > q[3]) continue;
+      if (ATFabric.inside(x.p, D.buildings[i].r[0])) { D.buildings[i].shops = (D.buildings[i].shops || 0) + 1; break; }
+    }
+  });
+  D.buildings.forEach(b => {
+    let c = classify(b.t);
+    if ((c === 'residential' || c === 'unknown') && b.shops) c = c === 'residential' || inAny(b.c, resLU) ? 'mixed' : 'commercial';
+    if (c === 'unknown' && b.c) c = inAny(b.c, resLU) ? 'residential' : inAny(b.c, indLU) ? 'industrial' : inAny(b.c, comLU) ? 'commercial' : 'unknown';
+    b.cls = c; b.area = Math.abs(ATFabric.signedArea(b.r[0]));
+    b.lv = parseFloat(b.t['building:levels']) || null;
+  });
+  D.buildings = D.buildings.filter(b => b.c && Math.abs(b.c[0]) <= w / 2 + 20 && Math.abs(b.c[1]) <= h / 2 + 20);
+  D.stops = D.stops.filter(s => inFrame(s.p));
+  // De-duplicate stops of the same kind and name within 40 m (platforms on both sides of a street).
+  D.stopsU = []; D.stops.forEach(s => { if (!D.stopsU.some(u => u.kind === s.kind && u.name === s.name && Math.hypot(u.p[0] - s.p[0], u.p[1] - s.p[1]) < 40)) D.stopsU.push(s); });
+  D.marks.sort((a, b) => a.p[1] === b.p[1] ? a.p[0] - b.p[0] : b.p[1] - a.p[1]);   // number from the top, left to right
+  const seen = new Set(); D.marks = D.marks.filter(m => { const k = m.name.toLowerCase(); if (seen.has(k)) return false; seen.add(k); return true; }).slice(0, 40);
+  return D;
+}
+
+// ---------- Drawing ----------
+const ROADS = {   // [width at 1:1000 in mm, colour] — width scales with the sheet scale, down to a minimum
+  motorway: [2.2, '#8c2d1e'], trunk: [2.0, '#b33b24'], primary: [1.8, '#d9604c'], secondary: [1.5, '#eba45e'], tertiary: [1.2, '#f3d27a'],
+  motorway_link: [1.1, '#8c2d1e'], trunk_link: [1.0, '#b33b24'], primary_link: [1.0, '#d9604c'], secondary_link: [0.9, '#eba45e'], tertiary_link: [0.8, '#f3d27a'],
+  unclassified: [0.9, '#ffffff'], residential: [0.9, '#ffffff'], living_street: [0.8, '#ffffff'], service: [0.5, '#ffffff'],
+  pedestrian: [0.9, '#cfe3bf'], footway: [0.35, '#6fa36b'], path: [0.3, '#6fa36b'], steps: [0.35, '#6fa36b'], cycleway: [0.35, '#2f5d8a'], track: [0.4, '#c9b99a']
+};
+const STOPS = { bus: ['#2f5d8a', 'B'], dolmus: ['#5b8fd6', 'D'], tram: ['#8e6fc1', 'T'], metro: ['#c8553d', 'M'], rail: ['#1b1b19', 'R'], ferry: ['#1f7a8c', 'F'] };
+const STOPN = { bus: 'Bus stop', dolmus: 'Dolmuş stop', tram: 'Tram stop', metro: 'Metro entrance', rail: 'Rail station', ferry: 'Ferry pier' };
+
+let clipN = 0;
+function sheetSvg(kind) {
+  const D = data, k = 1000 / S, X0 = PAGE.mx, Y0 = PAGE.my + 16, cid = 'umclip' + (++clipN);   // unique per render: the screen copy is hidden when printing
+  const X = x => (X0 + PAGE.mapW / 2 + x * k).toFixed(2), Y = y => (Y0 + PAGE.mapH / 2 - y * k).toFixed(2);
+  const path = rs => rs.map(r => 'M' + r.map(p => X(p[0]) + ' ' + Y(p[1])).join('L') + 'Z').join('');
+  const line = l => 'M' + l.map(p => X(p[0]) + ' ' + Y(p[1])).join('L');
+  const z = S / 1000, rw = (mm) => Math.max(mm / Math.sqrt(z), 0.18);   // road widths shrink gently at smaller scales
+  let m = '';
+  // Base: water and green are on every sheet, quietly.
+  const quiet = kind !== 'open';
+  D.water.forEach(x => m += `<path d="${path(x.r)}" fill="${quiet ? '#dbe7f0' : '#9fc3e0'}" fill-rule="evenodd"/>`);
+  D.green.forEach(x => m += `<path d="${path(x.r)}" fill="${quiet ? '#e7eedd' : greenFill(x.kind)}" fill-rule="evenodd"/>`);
+  if (kind === 'open') D.squares.forEach(x => m += `<path d="${path(x.r)}" fill="#f6e3c4" stroke="#c9a46a" stroke-width="0.2" fill-rule="evenodd"/>`);
+  // Streets.
+  const order = ['track', 'path', 'footway', 'steps', 'cycleway', 'service', 'living_street', 'residential', 'unclassified', 'pedestrian', 'tertiary_link', 'secondary_link', 'primary_link', 'trunk_link', 'motorway_link', 'tertiary', 'secondary', 'primary', 'trunk', 'motorway'];
+  const rs = D.roads.filter(r => ROADS[r.k]).sort((a, b) => order.indexOf(a.k) - order.indexOf(b.k));
+  if (kind === 'transport') {
+    rs.forEach(r => { const [wd] = ROADS[r.k]; if (ROADS[r.k][1] === '#ffffff' || /pedestrian/.test(r.k)) m += `<path d="${line(r.line)}" fill="none" stroke="#b9b5ab" stroke-width="${(rw(wd) + 0.25).toFixed(2)}" stroke-linecap="round" stroke-linejoin="round"/>`; });
+    rs.forEach(r => { const [wd, col] = ROADS[r.k]; m += `<path d="${line(r.line)}" fill="none" stroke="${col}" stroke-width="${rw(wd).toFixed(2)}" stroke-linecap="round" stroke-linejoin="round"${/footway|path|steps|cycleway/.test(r.k) ? ` stroke-dasharray="${(rw(wd) * 2.5).toFixed(2)} ${(rw(wd) * 1.5).toFixed(2)}"` : ''}/>`; });
+    D.rails.forEach(r => { const c = r.k === 'tram' ? '#8e6fc1' : r.k === 'subway' ? '#c8553d' : '#1b1b19';
+      m += `<path d="${line(r.line)}" fill="none" stroke="${c}" stroke-width="0.6"${r.k === 'subway' ? ' stroke-dasharray="1.2 0.8"' : ''}/>` + (r.k === 'rail' ? `<path d="${line(r.line)}" fill="none" stroke="#fff" stroke-width="0.3" stroke-dasharray="1 1"/>` : ''); });
+  } else {
+    rs.forEach(r => m += `<path d="${line(r.line)}" fill="none" stroke="#ece9e2" stroke-width="${(rw(ROADS[r.k][0]) * 0.9).toFixed(2)}" stroke-linecap="round" stroke-linejoin="round"/>`);
+  }
+  // Buildings.
+  D.buildings.forEach(b => {
+    const fill = kind === 'landuse' ? LUC[b.cls] : kind === 'landmarks' ? (b.t.heritage || b.t.historic ? '#c8553d' : '#cfccc3') : kind === 'transport' ? '#dcd9d0' : '#bdb9b0';
+    m += `<path d="${path(b.r)}" fill="${fill}" stroke="${kind === 'landuse' ? '#6b6964' : 'none'}" stroke-width="0.08" fill-rule="evenodd"/>`;
+  });
+  if (kind === 'open') D.trees.forEach(p => m += `<circle cx="${X(p[0])}" cy="${Y(p[1])}" r="${Math.max(0.35, 3 * k).toFixed(2)}" fill="#5f8f4e" opacity=".85"/>`);
+  if (kind === 'transport') D.stopsU.forEach(s => { const [c, l] = STOPS[s.kind]; m += `<circle cx="${X(s.p[0])}" cy="${Y(s.p[1])}" r="1.5" fill="${c}" stroke="#fff" stroke-width="0.3"/><text x="${X(s.p[0])}" y="${(+Y(s.p[1]) + 0.75).toFixed(2)}" font-size="2" font-weight="700" fill="#fff" text-anchor="middle">${l}</text>`; });
+  if (kind === 'landmarks') D.marks.forEach((mk, i) => m += `<circle cx="${X(mk.p[0])}" cy="${Y(mk.p[1])}" r="2.2" fill="${mk.listed ? '#c8553d' : '#1b1b19'}" stroke="#fff" stroke-width="0.4"/><text x="${X(mk.p[0])}" y="${(+Y(mk.p[1]) + 0.9).toFixed(2)}" font-size="2.4" font-weight="700" fill="#fff" text-anchor="middle">${i + 1}</text>`);
+
+  // Page.
+  const titles = { landuse: 'Land use', transport: 'Transport and access', open: 'Open space network', landmarks: 'Landmarks and heritage' };
+  const nos = { landuse: '01', transport: '02', open: '03', landmarks: '04' };
+  let o = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${PAGE.w} ${PAGE.h}" font-family="Inter, sans-serif" fill="#1b1b19">`;
+  o += `<rect width="${PAGE.w}" height="${PAGE.h}" fill="#fff"/><defs><clipPath id="${cid}"><rect x="${X0}" y="${Y0}" width="${PAGE.mapW}" height="${PAGE.mapH}"/></clipPath></defs>`;
+  o += `<text x="${X0}" y="${PAGE.my + 4}" font-size="3" font-weight="600" fill="#c8553d" letter-spacing=".4">${nos[kind]} · URBAN ANALYSIS</text>`;
+  o += `<text x="${X0}" y="${PAGE.my + 11.5}" font-size="7" font-weight="700">${esc(titles[kind])}</text>`;
+  o += `<text x="${X0 + PAGE.mapW}" y="${PAGE.my + 11.5}" font-size="3.2" text-anchor="end" fill="#4a4945">${esc($('title').value.trim() || D.o.name || '')} · ${D.o.lat.toFixed(4)}° N, ${D.o.lng.toFixed(4)}° E</text>`;
+  o += `<g clip-path="url(#${cid})"><rect x="${X0}" y="${Y0}" width="${PAGE.mapW}" height="${PAGE.mapH}" fill="#faf9f6"/>${m}</g>`;
+  o += `<rect x="${X0}" y="${Y0}" width="${PAGE.mapW}" height="${PAGE.mapH}" fill="none" stroke="#1b1b19" stroke-width="0.35"/>`;
+  // Scale bar and north arrow.
+  const bar = S <= 1000 ? 50 : S <= 2000 ? 100 : 250, bl = bar * k, bx = X0 + 6, by = Y0 + PAGE.mapH - 7;
+  o += `<rect x="${bx - 2}" y="${by - 5}" width="${bl + 22}" height="9" fill="#fff" opacity=".85"/>`;
+  o += `<rect x="${bx}" y="${by}" width="${bl / 2}" height="1.4" fill="#1b1b19"/><rect x="${bx + bl / 2}" y="${by}" width="${bl / 2}" height="1.4" fill="#fff" stroke="#1b1b19" stroke-width="0.2"/>`;
+  o += `<text x="${bx}" y="${by - 1.2}" font-size="2.4">0</text><text x="${bx + bl}" y="${by - 1.2}" font-size="2.4" text-anchor="middle">${bar} m</text><text x="${bx + bl + 4}" y="${by + 1.4}" font-size="2.6" font-weight="600">1:${S}</text>`;
+  o += `<g transform="translate(${X0 + PAGE.mapW - 10} ${Y0 + 12})"><circle r="6" fill="#fff" stroke="#e3e0d8" stroke-width="0.3"/><path d="M0 -4.5 L2.4 3 L0 1.6 L-2.4 3Z" fill="#1b1b19"/><text y="-7.5" font-size="3" font-weight="700" text-anchor="middle">N</text></g>`;
+  // Legend column.
+  o += legend(kind, PAGE.colX, Y0);
+  o += `<text x="${X0}" y="${PAGE.h - 6}" font-size="2.4" fill="#8a8882">Data © OpenStreetMap contributors (ODbL), downloaded ${new Date().toISOString().slice(0, 10)}. Unmapped features are missing: check on site. Road class is a proxy for traffic, not a count. Made with a_tools.</text>`;
+  return o + '</svg>';
+}
+function greenFill(k) { return /cemetery/.test(k) ? '#c9d6bf' : /pitch|playground/.test(k) ? '#bfdcae' : /wood|forest|scrub/.test(k) ? '#9cc08a' : /beach/.test(k) ? '#f2e3b8' : '#b7d6a0'; }
+
+function legend(kind, x, y) {
+  const D = data; let o = '', yy = y + 2;
+  const head = t => { o += `<text x="${x}" y="${yy + 3}" font-size="3.2" font-weight="700">${t}</text>`; yy += 7; };
+  const row = (sw, label, val) => { o += sw + `<text x="${x + 7}" y="${yy + 2.6}" font-size="2.8">${esc(label)}</text>` + (val != null ? `<text x="${x + 86}" y="${yy + 2.6}" font-size="2.8" text-anchor="end" fill="#4a4945">${val}</text>` : ''); yy += 5; };
+  const box = c => `<rect x="${x}" y="${yy}" width="5" height="3.4" rx="0.5" fill="${c}" stroke="#6b6964" stroke-width="0.1"/>`;
+  const ln = (c, w, dash) => `<line x1="${x}" y1="${yy + 1.7}" x2="${x + 5}" y2="${yy + 1.7}" stroke="${c}" stroke-width="${w}"${dash ? ' stroke-dasharray="1 .6"' : ''}/>`;
+  const dot = (c, l) => `<circle cx="${x + 2.5}" cy="${yy + 1.7}" r="1.6" fill="${c}"/><text x="${x + 2.5}" y="${yy + 2.5}" font-size="2" font-weight="700" fill="#fff" text-anchor="middle">${l}</text>`;
+  if (kind === 'landuse') {
+    const st = landuseStats(); head('Building use'); o += `<text x="${x + 86}" y="${yy - 3}" font-size="2.4" text-anchor="end" fill="#8a8882">buildings · footprint</text>`;
+    st.rows.forEach(r => row(box(LUC[r.k]), LUN[r.k], `${fmt(r.n)} · ${Math.round(100 * r.a / st.area)}%`));
+    yy += 3; head('Reading the map');
+    const top = st.rows.filter(r => r.k !== 'unknown')[0], unk = st.rows.find(r => r.k === 'unknown');
+    o += para(x, yy, [`${fmt(D.buildings.length)} buildings, ${fmt(st.area / 1e4, 1)} ha of footprint.`, top ? `Largest use: ${LUN[top.k].toLowerCase()} (${Math.round(100 * top.a / st.area)}% of footprint).` : '',
+      `${fmt(D.pois.filter(p => POI_COM(p.t)).length)} shops, cafés, offices and services mapped as points.`, unk ? `${Math.round(100 * unk.a / st.area)}% of footprint has no use in OSM: survey these.` : '']);
+  } else if (kind === 'transport') {
+    head('Street hierarchy'); o += `<text x="${x + 86}" y="${yy - 3}" font-size="2.4" text-anchor="end" fill="#8a8882">km in frame</text>`;
+    const km = roadKm();
+    [['Motorway, trunk', '#b33b24', 1.6, /^(motorway|trunk)/], ['Primary', '#d9604c', 1.4, /^primary/], ['Secondary', '#eba45e', 1.2, /^secondary/], ['Tertiary', '#f3d27a', 1, /^tertiary/],
+     ['Local streets', '#b9b5ab', 0.9, /^(residential|unclassified|living_street|service)$/], ['Pedestrian streets', '#cfe3bf', 1, /^pedestrian$/], ['Footpaths, steps', '#6fa36b', 0.4, /^(footway|path|steps)$/], ['Cycleways', '#2f5d8a', 0.4, /^cycleway$/]]
+      .forEach(([n, c, w, re]) => row(ln(c, w, /Foot|Cycle/.test(n)), n, fmt(Object.entries(km).filter(([kk]) => re.test(kk)).reduce((a, [, v]) => a + v, 0), 1)));
+    if (D.rails.length) row(ln('#1b1b19', 0.6), 'Rail, tram, metro lines');
+    yy += 3; head('Public transport'); o += `<text x="${x + 86}" y="${yy - 3}" font-size="2.4" text-anchor="end" fill="#8a8882">in frame</text>`;
+    Object.keys(STOPS).forEach(kk => { const n = D.stopsU.filter(s => s.kind === kk).length; if (n) row(dot(...STOPS[kk]), STOPN[kk], n); });
+    if (!D.stopsU.length) o += para(x, yy, ['No stops are mapped in this frame.']), yy = para.y;
+    yy += 3; head('Reading the map');
+    o += para(x, yy, ['Line weight follows the OSM road class, the usual proxy for traffic.', 'Count vehicles and people on site at peak hours to confirm.']);
+  } else if (kind === 'open') {
+    const st = openStats(); head('Open space'); o += `<text x="${x + 86}" y="${yy - 3}" font-size="2.4" text-anchor="end" fill="#8a8882">ha · % of frame</text>`;
+    st.forEach(r => row(box(r.c), r.n, `${fmt(r.a / 1e4, 2)} · ${fmt(100 * r.a / (D.w * D.h), 1)}%`));
+    row(`<circle cx="${x + 2.5}" cy="${yy + 1.7}" r="1.2" fill="#5f8f4e"/>`, 'Trees mapped', fmt(D.trees.length));
+    yy += 3; head('Reading the map');
+    const bArea = D.buildings.reduce((a, b) => a + b.area, 0);
+    o += para(x, yy, [`Built footprint covers ${fmt(100 * bArea / (D.w * D.h), 0)}% of the frame.`, `Green and squares cover ${fmt(100 * st.reduce((a, r) => a + (/Water/.test(r.n) ? 0 : r.a), 0) / (D.w * D.h), 1)}%.`, 'Trees are only those mapped in OSM.']);
+  } else {
+    head('Landmarks'); yy -= 1;
+    D.marks.slice(0, 30).forEach((mk, i) => { row(`<circle cx="${x + 2.5}" cy="${yy + 1.7}" r="1.7" fill="${mk.listed ? '#c8553d' : '#1b1b19'}"/><text x="${x + 2.5}" y="${yy + 2.5}" font-size="2" font-weight="700" fill="#fff" text-anchor="middle">${i + 1}</text>`, (mk.name.length > 34 ? mk.name.slice(0, 33) + '…' : mk.name)); o += `<text x="${x + 7}" y="${yy + 0.8}" font-size="2.1" fill="#8a8882">${esc(mk.kind)}</text>`; yy += 2; });
+    if (!D.marks.length) o += para(x, yy, ['No named historic places, monuments or attractions are mapped here.']), yy = para.y;
+    yy += 3; row(box('#c8553d'), 'Historic or listed building'); row(`<circle cx="${x + 2.5}" cy="${yy + 1.7}" r="1.6" fill="#c8553d"/>`, 'Listed (heritage tag)');
+  }
+  return o;
+}
+function para(x, y, lines) {
+  let o = '', yy = y;
+  lines.filter(Boolean).forEach(t => { const words = t.split(' '); let cur = ''; words.forEach(w => { if ((cur + ' ' + w).length > 52) { o += `<text x="${x}" y="${yy + 2.6}" font-size="2.6" fill="#4a4945">${esc(cur.trim())}</text>`; yy += 3.6; cur = w; } else cur += ' ' + w; }); o += `<text x="${x}" y="${yy + 2.6}" font-size="2.6" fill="#4a4945">${esc(cur.trim())}</text>`; yy += 5; });
+  para.y = yy; return o;
+}
+
+// ---------- Statistics ----------
+function landuseStats() {
+  const by = {}; let area = 0;
+  data.buildings.forEach(b => { (by[b.cls] ||= { k: b.cls, n: 0, a: 0 }); by[b.cls].n++; by[b.cls].a += b.area; area += b.area; });
+  return { rows: Object.values(by).sort((a, b) => (a.k === 'unknown') - (b.k === 'unknown') || b.a - a.a), area: area || 1 };
+}
+// Length of each road class inside the frame (segments clipped by their midpoint).
+function roadKm() {
+  const km = {}, w = data.w / 2, h = data.h / 2;
+  data.roads.forEach(r => { for (let i = 0; i + 1 < r.line.length; i++) { const a = r.line[i], b = r.line[i + 1], m = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+    if (Math.abs(m[0]) <= w && Math.abs(m[1]) <= h) km[r.k] = (km[r.k] || 0) + Math.hypot(b[0] - a[0], b[1] - a[1]) / 1000; } });
+  return km;
+}
+function clippedArea(rs) {   // area of polygon rings inside the frame, by sampling on a 5 m grid for big shapes
+  const w = data.w / 2, h = data.h / 2, r0 = rs[0]; if (!r0) return 0;
+  const xs = r0.map(p => p[0]), ys = r0.map(p => p[1]);
+  if (Math.min(...xs) >= -w && Math.max(...xs) <= w && Math.min(...ys) >= -h && Math.max(...ys) <= h) return Math.abs(ATFabric.signedArea(r0)) - rs.slice(1).reduce((a, r) => a + Math.abs(ATFabric.signedArea(r)), 0);
+  const st = Math.max(2, Math.min(10, Math.sqrt(data.w * data.h) / 200)); let n = 0;
+  for (let x = Math.max(-w, Math.min(...xs)); x < Math.min(w, Math.max(...xs)); x += st) for (let y = Math.max(-h, Math.min(...ys)); y < Math.min(h, Math.max(...ys)); y += st) {
+    let ins = false; rs.forEach(r => { if (ATFabric.inside([x, y], r)) ins = !ins; }); if (ins) n++;
+  }
+  return n * st * st;
+}
+function openStats() {
+  const groups = [['Parks and gardens', '#b7d6a0', /park|garden|village_green|common|recreation_ground|grass|meadow|grassland/], ['Playgrounds and pitches', '#bfdcae', /playground|pitch/],
+    ['Woods and scrub', '#9cc08a', /wood|forest|scrub/], ['Cemeteries', '#c9d6bf', /cemetery/], ['Beaches', '#f2e3b8', /beach/]];
+  const out = groups.map(([n, c, re]) => ({ n, c, a: data.green.filter(g => re.test(g.kind || '')).reduce((a, g) => a + clippedArea(g.r), 0) })).filter(r => r.a > 0);
+  const sq = data.squares.reduce((a, g) => a + clippedArea(g.r), 0); if (sq) out.push({ n: 'Squares, pedestrian areas', c: '#f6e3c4', a: sq });
+  const wa = data.water.reduce((a, g) => a + clippedArea(g.r), 0); if (wa) out.push({ n: 'Water', c: '#9fc3e0', a: wa });
+  return out;
+}
+
+function counts(kind) {
+  let rows = [];
+  if (kind === 'landuse') { const st = landuseStats(); rows = st.rows.map(r => [`<span class="sw" style="background:${LUC[r.k]}"></span>${LUN[r.k]}`, fmt(r.n), Math.round(100 * r.a / st.area) + '%']); }
+  if (kind === 'transport') { const km = roadKm(); rows = Object.keys(STOPS).map(k => [`<span class="sw" style="background:${STOPS[k][0]}"></span>${STOPN[k]}`, data.stopsU.filter(s => s.kind === k).length, '']).filter(r => r[1])
+    .concat(Object.entries(km).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([k, v]) => [k.replace(/_/g, ' '), fmt(v, 2) + ' km', ''])); }
+  if (kind === 'open') rows = openStats().map(r => [`<span class="sw" style="background:${r.c}"></span>${r.n}`, fmt(r.a / 1e4, 2) + ' ha', fmt(100 * r.a / (data.w * data.h), 1) + '%']).concat([['Trees mapped', fmt(data.trees.length), '']]);
+  if (kind === 'landmarks') rows = data.marks.map((m, i) => [`${i + 1}. ${esc(m.name)}`, esc(m.kind), m.wd ? `<a href="https://www.wikidata.org/wiki/${esc(m.wd)}" target="_blank" rel="noopener">wiki</a>` : '']);
+  $('cntTitle').textContent = { landuse: 'Land use', transport: 'Transport', open: 'Open space', landmarks: 'Landmarks' }[kind];
+  $('cnt').innerHTML = rows.map(r => `<tr>${r.map(c => `<td>${c}</td>`).join('')}</tr>`).join('') || '<tr><td>Nothing mapped here.</td></tr>';
+  $('cntGroup').hidden = false;
+}
+
+// ---------- Exports ----------
+$('run').onclick = run;
+const base = () => `urban-${ATools.slug($('title').value.trim() || data.o.name)}-1-${S}`;
+$('svg').onclick = () => ATools.download(`${base()}-${tab}.svg`, sheetSvg(tab), 'image/svg+xml');
+$('csv').onclick = () => {
+  const lu = landuseStats(), km = roadKm(), out = [['sheet', 'item', 'count', 'area_m2_or_km', 'share_pct']];
+  lu.rows.forEach(r => out.push(['land use', LUN[r.k], r.n, Math.round(r.a), (100 * r.a / lu.area).toFixed(1)]));
+  Object.keys(STOPS).forEach(k => out.push(['transport', STOPN[k], data.stopsU.filter(s => s.kind === k).length, '', '']));
+  Object.entries(km).forEach(([k, v]) => out.push(['transport', 'street km: ' + k, '', v.toFixed(3), '']));
+  openStats().forEach(r => out.push(['open space', r.n, '', Math.round(r.a), (100 * r.a / (data.w * data.h)).toFixed(2)]));
+  out.push(['open space', 'trees mapped', data.trees.length, '', '']);
+  data.marks.forEach((m, i) => out.push(['landmarks', `${i + 1}. ${m.name} (${m.kind})`, '', '', '']));
+  ATools.download(base() + '.csv', out.map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n'), 'text/csv');
+};
+function printSheets(kinds) { $('printArea').innerHTML = kinds.map(k => sheetSvg(k)).join(''); window.print(); }
+$('print1').onclick = () => printSheets([tab]);
+$('printAll').onclick = () => printSheets(['landuse', 'transport', 'open', 'landmarks']);
+</script>
+</body>
+</html>

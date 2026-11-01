@@ -18,6 +18,7 @@ Free, browser-based design tools for architects and architecture students.
 | Facade Sun | Prototype | [`tools/facade-sun/`](tools/facade-sun/index.html) |
 | Precedent Finder | Prototype | [`tools/precedents/`](tools/precedents/index.html) |
 | Site Section | Prototype | [`tools/site-section/`](tools/site-section/index.html) |
+| Urban Analysis Map | Prototype | [`tools/urban-map/`](tools/urban-map/index.html) |
 | Programme & Adjacency | Experimental, not linked from the hub | [`tools/programme/`](tools/programme/index.html) |
 
 ### Sun & Shadow Study
@@ -69,6 +70,10 @@ Searches Wikidata (SPARQL at query.wikidata.org) for buildings by architect (P84
 ### Site Section
 
 Draw a line A–B (up to 1 km) on the map. Terrain: 100 samples along the line from Copernicus DEM (90 m) via the Open-Meteo elevation API. Buildings and streets: Overpass around the line. Buildings the line crosses are cut (even-odd intervals of the line against each footprint, holes included) and drawn in black; buildings on the chosen side within a set depth are projected onto the section plane and drawn as a lighter elevation, far to near, standing on the ground level at their own centre. Streets crossed are marked with their width (`width` tag, else lanes or a default per road class). For the widest street crossed, W is the distance between the first cut buildings either side and H their mean height. Spot levels every 5–250 m and at building bases. Exports: SVG, DXF (R12 polylines and text in metres, x from A, y above sea level) and an A3 print at a true scale (1:100 to 1:5000) with optional vertical exaggeration.
+
+### Urban Analysis Map
+
+Pick a frame (the A3 map area of 300 × 256 mm at 1:1000, 1:2000 or 1:5000) and load everything in it from Overpass in one query. Four sheets share the frame. Land use: buildings coloured by use from their own tags (`building`, `amenity`, `shop`, `office`, `tourism`); a residential building with shops or cafés mapped inside it becomes "residential with shops"; untagged buildings take the use of the `landuse` area around them, else stay "not tagged"; counts and footprint share per use. Transport: streets drawn by OSM road class (the usual proxy for traffic) with km per class in the frame, rail, tram and metro lines, and stops by mode (bus, dolmuş, tram, metro, rail, ferry; duplicates of the same stop within 40 m merged). Open space: parks, playgrounds, woods, cemeteries, beaches, squares and water with their area inside the frame, and mapped trees. Landmarks: named historic, listed (`heritage`), museum, attraction and tower features, numbered from the top. Exports: SVG per sheet, CSV of all counts, and a print of one sheet or all four as A3 landscape pages.
 
 ### Programme & Adjacency
 
