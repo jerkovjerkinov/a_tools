@@ -198,15 +198,6 @@ function cutIntervals(m, L0, b) {
   return out;
 }
 
-// The elevation model (Copernicus GLO-90) is a surface model: in dense blocks it rides over the roofs.
-// A morphological opening (running minimum, then running maximum, over ~60 m) removes bumps narrower than a block
-// and keeps real slopes, so the ground line follows the streets.
-function groundOnly(z, step) {
-  const w = Math.max(1, Math.round(30 / step)), n = z.length;
-  const run = (a, f) => a.map((_, i) => f(...a.slice(Math.max(0, i - w), Math.min(n, i + w + 1))));
-  return run(run(z, Math.min), Math.max);
-}
-
 async function elevations(points) {
   const out = [];
   for (let i = 0; i < points.length; i += 100) {
@@ -232,7 +223,8 @@ async function run() {
     $('status').textContent = ATools.errorText(osm.reason, 'buildings or terrain'); $('run').disabled = false; return;
   }
   // Terrain along the line (flat at 0 if the elevation service failed).
-  let zs = ter.status === 'fulfilled' ? groundOnly(ter.value, L0 / (NS - 1)) : null;
+  // The elevation model rides over roofs in dense blocks: openProfile strips those bumps.
+  let zs = ter.status === 'fulfilled' ? ATFabric.openProfile(ter.value, L0 / (NS - 1)) : null;
   if (!zs) { zs = Array(NS).fill(0); notes.push(ATools.errorText(ter.reason, 'terrain') + ' Drawn on flat ground.'); }
   const zAt = t => { const f = Math.max(0, Math.min(NS - 1, t / L0 * (NS - 1))), i = Math.min(NS - 2, Math.floor(f)), w = f - i; return zs[i] * (1 - w) + zs[i + 1] * w; };
 

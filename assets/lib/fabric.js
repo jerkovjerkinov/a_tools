@@ -138,5 +138,22 @@ function masses(j, site, R, { defH = 9, floorH = 3, ground = () => 0 } = {}) {
   return out;
 }
 
-window.ATFabric = { load, parse, svg, stats, area, xy, signedArea, clean, inside, osmHeight, fetchMasses, masses };
+// The Open-Meteo elevation model (Copernicus GLO-90) is a surface model: in dense blocks it rides over the roofs.
+// A morphological opening (running minimum, then running maximum) removes bumps narrower than the window and keeps
+// real slopes, so the ground follows the streets. openProfile: samples along a line, step in metres.
+// openGrid: a row-major n × n grid with spacing step.
+function openProfile(z, step, win = 60) {
+  const w = Math.max(1, Math.round(win / 2 / step)), n = z.length;
+  const run = (a, f) => a.map((_, i) => f(...a.slice(Math.max(0, i - w), Math.min(n, i + w + 1))));
+  return run(run(z, Math.min), Math.max);
+}
+function openGrid(e, n, step, win = 200) {
+  const w = Math.max(1, Math.round(win / 2 / step));
+  const pass = (a, f) => a.map((_, k) => { const i = k % n, j = Math.floor(k / n), v = [];
+    for (let b = Math.max(0, j - w); b <= Math.min(n - 1, j + w); b++) for (let c = Math.max(0, i - w); c <= Math.min(n - 1, i + w); c++) v.push(a[b * n + c]);
+    return f(...v); });
+  return pass(pass(e, Math.min), Math.max);
+}
+
+window.ATFabric = { openProfile, openGrid, load, parse, svg, stats, area, xy, signedArea, clean, inside, osmHeight, fetchMasses, masses };
 })();

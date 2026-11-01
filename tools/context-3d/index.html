@@ -146,9 +146,9 @@ async function fetchTerrain(o) {
   }
   const e = (await ATools.fetchJson(`https://api.open-meteo.com/v1/elevation?latitude=${lats.join(',')}&longitude=${lngs.join(',')}`, {}, 20000)).elevation;
   if (!e || e.length !== GRID * GRID) throw new Error('elevation');
-  const T = { e, R, step: 2 * R / (GRID - 1) };
+  const T = { e: ATFabric.openGrid(e, GRID, 2 * R / (GRID - 1)), R, step: 2 * R / (GRID - 1) };   // strip roofs from the surface model
   T.base = 0; T.base = groundAt(T, 0, 0);
-  T.min = Math.min(...e); T.max = Math.max(...e);
+  T.min = Math.min(...T.e); T.max = Math.max(...T.e);
   return T;
 }
 // Bilinear ground height (relative to the site point) at local x, y.
