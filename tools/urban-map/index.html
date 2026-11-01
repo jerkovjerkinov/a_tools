@@ -320,7 +320,7 @@ const STYLES = {
       religious: [['@v']], civic: [['#5a5a5a']], industrial: [['#a8a8a8']], transport: [['@vL']], sport: [['#e2e2e2']], unknown: [['#ffffff']],
       bld: [['#bdbdbd']], bldLight: [['#d9d9d9']], heritage: [['#111111']], fig: [['#111111']],
       fl1: [['#ffffff']], fl2: [['@hzL']], fl3: [['@h45']], fl4: [['@x']], fl5: [['#111111']], flU: [['#ffffff']],
-      water: [['@hzL']], waterOn: [['@hz']], greenQuiet: [['#ffffff']], park: [['#e6e6e6']], play: [['@vL']], wood: [['@h135']], cemetery: [['@x']], beach: [['#f3f3f3']], square: [['#ffffff']], tree: [['#111111']]
+      water: [['@hzL']], waterOn: [['@hz']], greenQuiet: [['#ffffff']], park: [['#bcbcbc']], play: [['@vL']], wood: [['@h135']], cemetery: [['@x']], beach: [['#f3f3f3']], square: [['#ffffff']], tree: [['#111111']]
     },
     road: { major: '#111111', secondary: '#111111', tertiary: '#444444', local: '#9a9a9a', ped: '#666666', foot: '#111111', cycle: '#111111', rail: '#111111', tram: '#111111', metro: '#111111' },
     stop: { bus: '#111111', dolmus: '#111111', tram: '#111111', metro: '#111111', rail: '#111111', ferry: '#111111' }, mark: '#111111', markListed: '#111111', outlined: true
@@ -429,7 +429,7 @@ function mapLayer(kind, X0, Y0, W, H, P) {
   const edge = st.outlined ? `stroke="${st.ink}" stroke-width="0.1"` : st.edge ? `stroke="${st.edge}" stroke-width="0.12"` : '';
   const groups = new Map();
   D.buildings.forEach(b => {
-    const key = kind === 'landuse' ? b.cls : kind === 'density' ? flKey(b.fl) : kind === 'figure' ? 'fig' : kind === 'landmarks' ? (b.t.heritage || b.t.historic ? 'heritage' : 'bldLight') : kind === 'transport' ? 'bldLight' : 'bld';
+    const key = kind === 'landuse' ? b.cls : kind === 'density' ? flKey(b.fl) : kind === 'figure' ? 'fig' : kind === 'landmarks' ? (b.t.heritage || b.t.historic ? 'heritage' : 'bldLight') : kind === 'transport' || kind === 'open' ? 'bldLight' : 'bld';   // buildings recede on the transport and open-space sheets
     // Solid edges only: Chrome's PDF writer turns every dash into geometry (a land-use sheet went from 3 MB to 120 KB without them).
     const ex = key === 'unknown' || key === 'flU' ? `stroke="${st.faint}" stroke-width="0.12"` : kind === 'density' && b.flEst ? `stroke="${st.faint}" stroke-width="0.1"` : kind === 'density' ? `stroke="${st.ink}" stroke-width="0.14"` : kind === 'landuse' || kind === 'density' || (st.outlined && !fig) ? edge : '';
     const g = key + '\u0001' + ex; groups.set(g, (groups.get(g) || '') + path(orient(b.r)));
