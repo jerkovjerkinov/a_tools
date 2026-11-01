@@ -16,6 +16,11 @@ Free, browser-based design tools for architects and architecture students.
 | 3D Context | Prototype | [`tools/context-3d/`](tools/context-3d/index.html) |
 | Sun Hours | Prototype | [`tools/sun-hours/`](tools/sun-hours/index.html) |
 | Facade Sun | Prototype | [`tools/facade-sun/`](tools/facade-sun/index.html) |
+| Precedent Finder | Prototype | [`tools/precedents/`](tools/precedents/index.html) |
+| Site Section | Prototype | [`tools/site-section/`](tools/site-section/index.html) |
+| Urban Analysis Map | Prototype | [`tools/urban-map/`](tools/urban-map/index.html) |
+| Isometric Map | Prototype | [`tools/iso-map/`](tools/iso-map/index.html) |
+| Terrain Model | Prototype | [`tools/terrain-model/`](tools/terrain-model/index.html) |
 | Programme & Adjacency | Experimental, not linked from the hub | [`tools/programme/`](tools/programme/index.html) |
 
 ### Sun & Shadow Study
@@ -60,13 +65,55 @@ Hours of direct sun on the ground (1 m grid, sun every 10 minutes) for any day, 
 
 Draw a footprint or pick a mapped building. Each facade (footprint edge, near-straight edges merged) gets six sample points (both ends and the middle, ground and top floor). For each point a 1° horizon profile is ray-cast against OSM neighbours within 200 m and the building itself; then every hour of a year is checked: the sun must be up, in front of the facade and above that horizon. Solar radiation on the vertical surface comes from Open-Meteo ERA5 hourly direct and diffuse radiation (direct × cos incidence, half the diffuse sky reduced by obstructions, ground reflection 0.2). Outputs: sun hours and kWh/m² per facade and month, share taken by neighbours, orientation-based shading notes (overhang depth for the equator-facing side), SVG plan diagram and CSV.
 
+### Precedent Finder
+
+Searches Wikidata (SPARQL at query.wikidata.org) for buildings by architect (P84), building type (P31, one subclass level), style (P149), country (P17), inception year (P571) and distance from the site (`wikibase:around` on P625). By default only items with a photo (P18) and a known architect. The best known 150 (by sitelink count) come back as cards with Commons thumbnails, a map view and a detail view with the English Wikipedia summary and the photo's author and licence from the Commons API. Starred items form a board kept in the browser, printed as one A3 sheet (up to 9, each photo credited) or exported as CSV. Architect, style and country fields use `wbsearchentities` suggestions.
+
+### Site Section
+
+Draw a line A–B (up to 1 km) on the map. Terrain: 100 samples along the line from Copernicus DEM (90 m) via the Open-Meteo elevation API. Buildings and streets: Overpass around the line. Buildings the line crosses are cut (even-odd intervals of the line against each footprint, holes included) and drawn in black; buildings on the chosen side within a set depth are projected onto the section plane and drawn as a lighter elevation, far to near, standing on the ground level at their own centre. Streets crossed are marked with their width (`width` tag, else lanes or a default per road class). For the widest street crossed, W is the distance between the first cut buildings either side and H their mean height. Spot levels every 5–250 m and at building bases. Exports: SVG, DXF (R12 polylines and text in metres, x from A, y above sea level) and an A3 print at a true scale (1:100 to 1:5000) with optional vertical exaggeration.
+
+### Urban Analysis Map
+
+Pick a frame (the A3 map area of 300 × 256 mm at 1:1000, 1:2000 or 1:5000) and load everything in it from Overpass in one query. Four sheets share the frame. Land use: buildings coloured by use from their own tags (`building`, `amenity`, `shop`, `office`, `tourism`); a residential building with shops or cafés mapped inside it becomes "residential with shops"; untagged buildings take the use of the `landuse` area around them, else stay "not tagged"; counts and footprint share per use. Transport: streets drawn by OSM road class (the usual proxy for traffic) with km per class in the frame, rail, tram and metro lines, and stops by mode (bus, dolmuş, tram, metro, rail, ferry; duplicates of the same stop within 40 m merged). Open space: parks, playgrounds, woods, cemeteries, beaches, squares and water with their area inside the frame, and mapped trees. Landmarks: named historic, listed (`heritage`), museum, attraction and tower features, numbered from the top. Three graphic styles: Atlas (muted flat colour on a pale ground, white party walls, one red accent), Riso (three overprinted inks, yellow, blue and pink, with multiply blending and a slight misregistration; mixed uses read as mixed inks) and Ink (black and white hatches and dot screens that photocopy cleanly). Exports: SVG per sheet, CSV of all counts, and a print of one sheet or all four as A3 landscape pages.
+
+### Isometric Map
+
+A 300 m to 1 km square around the site drawn as an isometric A3 sheet from eight directions, in three styles (Warm, Clay, Ink). One Overpass query brings buildings, building parts, streets, coastline, water, green, squares, trees, city walls, towers and minarets; terrain is a 12 × 12 grid from the Open-Meteo elevation API with building bumps removed by a morphological opening (the same as Site Section and 3D Context), drawn true or ×2. The sea is built from `natural=coastline` (land on the left), clipped to the square. Heights: OSM `height`, else `building:levels` × 3.2 m, else type defaults for monuments (minaret 45 m, mosque body scaled to its footprint with a dome on the main part, keep 20 m, defensive tower 14 m, city wall 10 m × 4 m, tomb with a dome), else an estimate: the GHSL built-height layer (GHS-BUILT-H 2018, average building height per 90 m cell, CC BY 4.0, read from its cloud-optimised GeoTIFF with range requests through `assets/lib/ghsl.js`) scaled by footprint size with ±1 floor of jitter, falling back to footprint size alone, or a fixed floor count. A large `historic=castle` area is ground, not a building; walls get crenellations; `roof:shape=pyramidal|cone` and `dome` are drawn. Exports: SVG, PNG (4200 × 2970 px), A3 print, and the same scene as a 3D model (OBJ, DXF with 3D faces plus street, green, water and tree layers, and binary STL with a closed base for 3D printing) through `assets/lib/model.js`.
+
+### Terrain Model
+
+A 500 m to 5 km square around the site turned into a 3D model in the browser, from open data fetched live (nothing is stored on a server). Sources, all loaded in parallel with a progress card:
+
+- **Elevation**: [Mapterhorn](https://mapterhorn.com) terrain tiles (Terrarium-encoded WebP, best zoom found by probing; Copernicus GLO-30 in most of the world, finer national lidar where available), falling back to the AWS Terrain Tiles (Terrarium PNG). Sampled with bicubic interpolation onto a 201, 401 or 801 node grid.
+- **Roads, rail, water, land cover, mapped trees and buildings**: one Overpass query (with mirrors). Multipolygons are assembled from member ways; the sea comes from the coastline.
+- **Building heights**: OSM `height` / `building:levels`, else the GHSL built-height layer (as in the Isometric Map), else a default.
+- **Vegetation and imagery**: the least cloudy recent Sentinel-2 L2A scene (Element 84 Earth Search STAC, with an S3 listing fallback by MGRS tile), read straight from its cloud-optimised GeoTIFFs with range requests (`assets/lib/cog.js`: TIFF/BigTIFF, deflate, predictor 2). Red and near-infrared give NDVI; the scene classification masks cloud; the true-colour image drapes the Satellite style. Leaf-off winter scenes are avoided.
+- **Water history**: JRC Global Surface Water occurrence 1984–2021.
+
+The ground is then shaped like a site model: roads get level benches across the slope (a running mean along the centre line), mapped streams get beds that never rise downstream, and each building sits on a pad at the median ground under its footprint. Slope (Horn), aspect, hillshade and hydrology (priority-flood fill, D8 flow accumulation, flow lines above 2 ha, topographic wetness) are computed on the natural ground and summarised in a site report (relief, slope classes, aspect shares).
+
+Trees: mapped trees and rows from OSM, woods, orchards, parks and scrub filled at their typical spacing, plus trees found in the Sentinel-2 vegetation index where nothing is mapped (seeded, so a rebuild is the same).
+
+View: perspective, axonometric, plan and a moving section (N–S or E–W) with a cut face; four looks (Clay, Atlas, Ink, Satellite) and analysis maps (elevation, slope, aspect, wetness, water history, vegetation) draped on the ground; vertical exaggeration 1–4×; sun shadows. Built with three.js.
+
+Downloads:
+- **3D**: Rhino `.3dm` (rhino3dm.js, metres, layers and sub-layers, trees as block instances), DXF R12 (polyface meshes, layers, tree blocks), OBJ, and a closed STL for 3D printing at a chosen scale. Local coordinates or UTM; lines draped or flat; trees as 3D blocks, points, or left out.
+- **Drawing**: layered plan SVG (contours with labels, roads, water, buildings, trees, title block), A-size PDF at a true scale, view PNG and a 4096 px plan PNG.
+- **GIS**: GeoTIFF elevation and slope (float32, EPSG:4326), GeoJSON of all layers, KML.
+- **Laser**: contour plates at the chosen scale, sheet thickness and height exaggeration (at most 150), packed onto sheets, each with a numbered label and a score line where the next plate sits; SVG or DXF.
+
+Libraries: `assets/lib/terrain.js` (DEM loading, shaping, contours, plates, analysis), `land.js` (OSM parsing, land cover raster, tree placement), `sentinel.js`, `cog.js`, `utm.js` (UTM and MGRS) and `export3d.js` (3dm, DXF, OBJ, GeoTIFF and laser writers).
+
+Data credits: Mapterhorn (see its attribution page; Copernicus DEM © DLR/Airbus, ESA), AWS Terrain Tiles (Mapzen, various sources), © OpenStreetMap contributors (ODbL), Copernicus Sentinel-2 data (modified), JRC Global Surface Water (Pekel et al. 2016, © EC JRC/Google), GHSL (EC JRC, CC BY 4.0).
+
 ### Programme & Adjacency
 
 An editable space list (area, number, zone) from templates (house, primary school, library, office floor, student housing), net / gross / floor-plate totals, an adjacency matrix (must / near / apart) and a force-laid bubble diagram with circle area proportional to floor area. Draggable; kept in the browser; CSV schedule and SVG diagram export.
 
-All tools share `assets/atools.css` and `assets/atools.js`. Calculations used by more than one tool live in `assets/lib/`: `sun.js` (sun position, sun path), `climate.js` (Open-Meteo download, climate summary, charts, design notes) and `fabric.js` (OSM buildings, figure-ground drawing, building masses with heights). Also, the site set on the hub (or in any tool) is stored in the browser and reused by the others.
+All tools share `assets/atools.css` and `assets/atools.js`. Calculations used by more than one tool live in `assets/lib/`: `sun.js` (sun position, sun path), `climate.js` (Open-Meteo download, climate summary, charts, design notes) `fabric.js` (OSM buildings, figure-ground drawing, building masses with heights, roof stripping for the elevation model) and `model.js` (3D meshes and OBJ / DXF / STL writers). Also, the site set on the hub (or in any tool) is stored in the browser and reused by the others.
 
-Each tool is a single static HTML file with no build step. Open it in a browser or serve the repo with any static host.
+Each tool is a single static HTML file with no build step. Regression checks live in `tests/` (see `tests/README.md`) and run on every push. Open it in a browser or serve the repo with any static host.
 
 Data: map tiles © OpenStreetMap contributors (openstreetmap.org standard tiles, greyed in CSS); buildings via the Overpass API; place search via Nominatim. Neighbour heights come from OSM `height` / `building:levels` tags and are often missing, so the tool falls back to an editable default.
 

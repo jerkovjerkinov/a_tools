@@ -145,8 +145,13 @@ function rose(data, season = 'year') {
   let s = `<svg viewBox="0 0 320 320">`;
   for (let v = ring; v <= top + 1e-9; v += ring) {
     s += `<circle cx="${cx}" cy="${cy}" r="${R * v / top}" fill="none" stroke="#e3e0d8"/>`;
-    s += `<text x="${cx + 3}" y="${cy - R * v / top - 2}" font-size="8" fill="#8a8882">${Math.round(v * 100)}%</text>`;
   }
+  // Ring labels go in the calmest gap between two sectors, drawn last with a white halo, so they never sit on a bar.
+  let gi = 0; totals.forEach((_, i) => { if (totals[i] + totals[(i + 1) % 16] < totals[gi] + totals[(gi + 1) % 16]) gi = i; });
+  const ga = (gi + .5) * Math.PI / 8;
+  let ringLabels = '';
+  const every = R * ring / top < 24 ? 2 : 1;   // too tight for a label on every ring
+  for (let v = ring * every; v <= top + 1e-9; v += ring * every) ringLabels += `<text x="${(cx + R * v / top * Math.sin(ga)).toFixed(1)}" y="${(cy - R * v / top * Math.cos(ga) + 3).toFixed(1)}" text-anchor="middle" font-size="8" fill="#8a8882" stroke="#fff" stroke-width="2.5" paint-order="stroke">${Math.round(v * 100)}%</text>`;
   const arc = (a, r0, r1) => {
     const p = (ang, rr) => [cx + rr * Math.sin(ang), cy - rr * Math.cos(ang)];
     const [a0, a1] = [a - half, a + half];
@@ -163,6 +168,7 @@ function rose(data, season = 'year') {
       acc += v;
     });
   });
+  s += ringLabels;
   [['N', 0], ['E', 90], ['S', 180], ['W', 270]].forEach(([t, a]) => {
     const rr = a * Math.PI / 180;
     s += `<text x="${cx + (R + 16) * Math.sin(rr)}" y="${cy - (R + 16) * Math.cos(rr) + 4}" text-anchor="middle" font-size="12" font-weight="600" fill="#4a4945">${t}</text>`;

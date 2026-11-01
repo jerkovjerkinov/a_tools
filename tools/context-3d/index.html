@@ -48,6 +48,7 @@
       <p class="group-title"><span class="step">2</span>Model</p>
       <div class="field"><label for="defH">Height when unknown <span class="unit">m</span></label><input id="defH" type="number" value="9" min="2" max="200" step="0.5"></div>
       <div class="field"><label for="floorH">Height per floor <span class="unit">m</span></label><input id="floorH" type="number" value="3" min="2" max="6" step="0.1"></div>
+      <label class="check"><input id="oGhsl" type="checkbox" checked>Estimate unknown heights from local building heights (GHSL)</label>
       <label class="check"><input id="oTerrain" type="checkbox" checked>Terrain (90 m elevation grid)</label>
       <label class="check"><input id="oRoads" type="checkbox" checked>Street centre lines (DXF only)</label>
       <button id="load" class="btn primary block">Build 3D model</button>
@@ -72,7 +73,7 @@
         <button id="xStl" class="btn" disabled>STL</button>
       </div>
       <p class="hint">Units are metres. The site point is at 0, 0, 0 and north is +Y (OBJ is Y-up, so north is −Z there).</p>
-      <p class="hint"><b>OBJ</b> Rhino, Blender, 3ds Max (Rhino: keep "Map OBJ Y to Rhino Z" on). <b>DXF</b> 3D faces on layers Buildings, Terrain and Streets for AutoCAD, Rhino, Revit and SketchUp Pro. <b>STL</b> 3D printing and most modelers.</p>
+      <p class="hint"><b>OBJ</b> Rhino, Blender, 3ds Max (Rhino: keep "Map OBJ Y to Rhino Z" on). <b>DXF</b> 3D faces on layers Buildings, Terrain and Streets for AutoCAD, Rhino, Revit and SketchUp Pro. <b>STL</b> 3D printing and most modelers. Buildings © OpenStreetMap contributors; unknown heights from GHS-BUILT-H 2018, EC JRC (CC BY 4.0).</p>
       <p class="hint">Data: buildings and heights © OpenStreetMap contributors; elevation from Copernicus DEM via Open-Meteo. Heights are often missing in OSM, so check them before you rely on them.</p>
     </div>
   </aside>
@@ -95,6 +96,7 @@
 <script src="https://cdn.jsdelivr.net/npm/earcut@2.2.4/dist/earcut.min.js"></script>
 <script src="../../assets/atools.js"></script>
 <script src="../../assets/lib/fabric.js"></script>
+<script src="../../assets/lib/ghsl.js"></script>
 <script src="../../assets/lib/axo.js"></script>
 <script>
 const $ = id => document.getElementById(id);
@@ -146,9 +148,9 @@ async function fetchTerrain(o) {
   }
   const e = (await ATools.fetchJson(`https://api.open-meteo.com/v1/elevation?latitude=${lats.join(',')}&longitude=${lngs.join(',')}`, {}, 20000)).elevation;
   if (!e || e.length !== GRID * GRID) throw new Error('elevation');
-  const T = { e, R, step: 2 * R / (GRID - 1) };
+  const T = { e: ATFabric.openGrid(e, GRID, 2 * R / (GRID - 1)), R, step: 2 * R / (GRID - 1) };   // strip roofs from the surface model
   T.base = 0; T.base = groundAt(T, 0, 0);
-  T.min = Math.min(...e); T.max = Math.max(...e);
+  T.min = Math.min(...T.e); T.max = Math.max(...T.e);
   return T;
 }
 // Bilinear ground height (relative to the site point) at local x, y.
@@ -156,11 +158,13 @@ function groundAt(T, x, y) {
   if (!T) return 0;
   const gx = Math.min(GRID - 1.001, Math.max(0, (x + T.R) / T.step)), gy = Math.min(GRID - 1.001, Math.max(0, (y + T.R) / T.step));
   const i = Math.floor(gx), j = Math.floor(gy), fx = gx - i, fy = gy - j, E = (a, b) => T.e[b * GRID + a];
-  return E(i, j) * (1 - fx) * (1 - fy) + E(i + 1, j) * fx * (1 - fy) + E(i, j + 1) * (1 - fx) * fy + E(i + 1, j + 1) * fx * fy - T.base;
+  // The same two triangles per cell as the exported mesh (diagonal from (i, j) to (i+1, j+1)), so buildings sit on it exactly.
+  const a = E(i, j), b = E(i + 1, j), c = E(i + 1, j + 1), d = E(i, j + 1);
+  return (fx >= fy ? a + fx * (b - a) + fy * (c - b) : a + fy * (d - a) + fx * (c - d)) - T.base;
 }
 
-function buildModel(j, T) {
-  const buildings = ATFabric.masses(j, site, R, { defH: +$('defH').value || 9, floorH: +$('floorH').value || 3, ground: (x, y) => groundAt(T, x, y) });
+function buildModel(j, T, G) {
+  const buildings = ATFabric.masses(j, site, R, { defH: +$('defH').value || 9, floorH: +$('floorH').value || 3, ground: (x, y) => groundAt(T, x, y), ghsl: G });
   const streets = j.elements.filter(el => el.tags && el.tags.highway && el.geometry).map(el => el.geometry.map(g => ATFabric.xy(g.lat, g.lon, site)));
   return { buildings, streets, T };
 }
@@ -197,20 +201,23 @@ async function load() {
   $('status').innerHTML = '<span class="spinner"></span>Loading buildings' + ($('oTerrain').checked ? ' and terrain…' : '…');
   $('load').disabled = true;
   const o = { ...site };
-  const [osm, ter] = await Promise.allSettled([fetchOsm(o), $('oTerrain').checked ? fetchTerrain(o) : Promise.resolve(null)]);
+  const [osm, ter, gh] = await Promise.allSettled([fetchOsm(o), $('oTerrain').checked ? fetchTerrain(o) : Promise.resolve(null), $('oGhsl').checked ? ATGhsl.load(o, R) : Promise.resolve(null)]);
   if (osm.status !== 'fulfilled') {
     $('status').textContent = ATools.errorText(osm.reason, 'buildings');
     $('load').disabled = false; return;
   }
   const T = ter.status === 'fulfilled' ? ter.value : null;
-  model = buildModel(osm.value, T);
+  const G = gh.status === 'fulfilled' && gh.value && gh.value.cells ? gh.value : null;
+  model = buildModel(osm.value, T, G);
   model.site = o;
   const bs = model.buildings, known = bs.filter(b => b.known).length;
   $('sB').textContent = bs.length.toLocaleString('en-US');
   $('sKnown').textContent = bs.length ? Math.round(100 * known / bs.length) + '%' : '–';
   $('sTall').textContent = bs.length ? Math.round(Math.max(...bs.map(b => b.z1 - b.z0))) + ' m' : '–';
   $('sElev').textContent = T ? `${Math.round(T.min)}–${Math.round(T.max)} m` : 'Flat';
-  $('status').textContent = `${bs.length.toLocaleString('en-US')} buildings ready.` +
+  const nG = bs.filter(b => b.est === 'ghsl').length;
+  $('status').textContent = `${bs.length.toLocaleString('en-US')} buildings ready.` + (nG ? ` ${nG.toLocaleString('en-US')} unknown heights estimated from GHSL (local average ${G.median.toFixed(0)} m).` : '') +
+    ($('oGhsl').checked && !G ? ' Local building heights could not be loaded, so unknown heights use the default.' : '') +
     ($('oTerrain').checked && !T ? ' Terrain could not be loaded, so the ground is flat.' : '');
   ['xObj', 'xDxf', 'xStl'].forEach(id => $(id).disabled = !bs.length);
   drawPreview();

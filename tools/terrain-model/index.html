@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Terrain Model · a_tools</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="../../assets/atools.css">
+<link rel="stylesheet" href="terrain-model.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="../../index.html"><span class="brand-mark"></span>a_tools</a>
+  <span class="crumb">/ <b>Terrain Model</b></span>
+  <span class="spacer"></span>
+  <span class="site-pill" id="sitePill" hidden></span>
+</header>
+
+<main class="tool tm">
+  <aside class="panel">
+    <h1>Terrain Model</h1>
+    <p class="lead">A 3D site model from open data: ground and contours, roads, water, trees and buildings, put together automatically. Download it for Rhino, CAD, GIS, print or the laser cutter.</p>
+
+    <div class="group">
+      <p class="group-title"><span class="step">1</span>Site</p>
+      <div class="row">
+        <input id="q" type="text" placeholder="Search a place or paste lat, lng">
+        <button id="go" class="btn" style="flex:0 0 auto">Go</button>
+      </div>
+      <div id="pick"></div>
+      <p class="hint" id="where">Tap the map to move the square.</p>
+      <div class="field" style="margin-top:10px"><span class="label">Size</span>
+        <div class="seg" id="size"><button data-v="500">500 m</button><button data-v="1000" class="on">1 km</button><button data-v="2000">2 km</button><button data-v="3000">3 km</button><button data-v="5000">5 km</button></div>
+      </div>
+    </div>
+
+    <div class="group">
+      <p class="group-title"><span class="step">2</span>Data</p>
+      <div class="checks">
+        <label><input type="checkbox" id="dBuild" checked>Buildings</label>
+        <label><input type="checkbox" id="dRoads" checked>Roads and paths</label>
+        <label><input type="checkbox" id="dWater" checked>Water</label>
+        <label><input type="checkbox" id="dTrees" checked>Trees and shrubs</label>
+        <label><input type="checkbox" id="dSat" checked>Satellite (Sentinel-2)</label>
+        <label><input type="checkbox" id="dHist" checked>Water history</label>
+      </div>
+      <div class="field" style="margin-top:10px"><span class="label">Ground detail</span>
+        <div class="seg" id="detail"><button data-v="201">Light</button><button data-v="401" class="on">Standard</button><button data-v="801">Fine</button></div>
+      </div>
+      <p class="label" style="margin:10px 0 4px">Shape the ground for a site model</p>
+      <div class="checks">
+        <label title="Flat platform under every building"><input type="checkbox" id="rPads" checked>Building pads</label>
+        <label title="Roads cut and filled to a smooth bench"><input type="checkbox" id="rBench" checked>Road benches</label>
+        <label title="Stream and river beds carved into the ground"><input type="checkbox" id="rChan" checked>Stream beds</label>
+      </div>
+      <button id="build" class="btn primary block" style="margin-top:12px">Build model</button>
+      <p class="hint" id="status"></p>
+    </div>
+
+    <div class="group" id="gLook">
+      <p class="group-title"><span class="step">3</span>Look</p>
+      <div class="field"><span class="label">Style</span>
+        <div class="seg" id="style"><button data-v="clay" class="on">Clay</button><button data-v="atlas">Atlas</button><button data-v="ink">Ink</button><button data-v="sat">Satellite</button></div>
+      </div>
+      <div class="grid-2">
+        <div class="field"><label for="mapOn">Map on the ground</label>
+          <select id="mapOn"><option value="">None</option><option value="elev">Elevation</option><option value="slope">Slope</option><option value="aspect">Aspect</option><option value="wet">Wetness</option><option value="hist">Water history</option><option value="ndvi">Vegetation (NDVI)</option></select></div>
+        <div class="field"><label for="cInt">Contours every</label>
+          <select id="cInt"><option value="auto">Auto</option><option>0.5</option><option>1</option><option>2</option><option>5</option><option>10</option><option>20</option><option>50</option><option value="0">Off</option></select></div>
+      </div>
+      <div class="field"><label for="vx">Vertical exaggeration <span class="unit" id="vxV">×1.0</span></label><input id="vx" type="range" min="1" max="4" step="0.25" value="1"></div>
+      <div class="checks">
+        <label><input type="checkbox" id="sBuild" checked>Buildings</label>
+        <label><input type="checkbox" id="sTrees" checked>Trees</label>
+        <label><input type="checkbox" id="sRoads" checked>Roads</label>
+        <label><input type="checkbox" id="sWater" checked>Water</label>
+        <label><input type="checkbox" id="sFlow">Flow lines</label>
+        <label><input type="checkbox" id="sShade">Hillshade</label>
+        <label><input type="checkbox" id="sShadow" checked>Shadows</label>
+      </div>
+      <div class="legend-col" id="legend"></div>
+    </div>
+
+    <div class="group" id="gReport">
+      <p class="group-title">Site report</p>
+      <div class="stats" id="stats"><div class="stat"><b>–</b><span>Build a model first</span></div></div>
+      <div id="slopeBars"></div>
+      <p class="hint" id="sources"></p>
+    </div>
+
+    <div class="group" id="gDown">
+      <p class="group-title"><span class="step">4</span>Download</p>
+      <div class="dl-tabs seg" id="dlTab"><button data-v="model" class="on">3D</button><button data-v="draw">Drawing</button><button data-v="gis">GIS</button><button data-v="laser">Laser</button></div>
+
+      <div class="dl" data-tab="model">
+        <div class="exports">
+          <button class="btn" data-x="3dm" disabled>Rhino .3dm</button><button class="btn" data-x="dxf" disabled>CAD .dxf</button>
+          <button class="btn" data-x="obj" disabled>.obj</button><button class="btn" data-x="stl" disabled>.stl print</button>
+        </div>
+        <div class="grid-2" style="margin-top:8px">
+          <div class="field"><label for="xCrs">Coordinates</label><select id="xCrs"><option value="local">Local (site at 0, 0)</option><option value="utm">UTM</option></select></div>
+          <div class="field"><label for="xVec">Lines</label><select id="xVec"><option value="drape">Draped on the ground</option><option value="flat">Flat (z = 0)</option></select></div>
+          <div class="field"><label for="xTree">Trees</label><select id="xTree"><option value="mesh">3D</option><option value="point">Points</option><option value="off">Leave out</option></select></div>
+          <div class="field"><label for="xStl">.stl scale</label><select id="xStl"><option value="1000">1:1000</option><option value="2000">1:2000</option><option value="5000" selected>1:5000</option><option value="10000">1:10000</option><option value="25000">1:25000</option></select></div>
+        </div>
+        <p class="hint">Metres, heights above sea level, north is +Y. Layers: Terrain, Contours, Water, Roads, Buildings, Vegetation. The .stl is a closed block in millimetres at the chosen scale, ready to slice.</p>
+      </div>
+
+      <div class="dl" data-tab="draw" hidden>
+        <div class="grid-2">
+          <div class="field"><label for="pScale">Scale</label><select id="pScale"></select></div>
+          <div class="field"><label for="pPaper">Paper</label><select id="pPaper"><option>A3</option><option selected>A2</option><option>A1</option><option>A0</option></select></div>
+        </div>
+        <div class="exports">
+          <button class="btn" data-x="svg" disabled>Plan .svg</button><button class="btn" data-x="pdf" disabled>Plan .pdf</button>
+          <button class="btn" data-x="png" disabled>View .png</button><button class="btn" data-x="pngplan" disabled>Plan .png</button>
+        </div>
+        <p class="hint">The plan is drawn to scale with named layers for Illustrator or Inkscape. PDF opens the print dialog: choose "Save as PDF" and the paper size shown.</p>
+      </div>
+
+      <div class="dl" data-tab="gis" hidden>
+        <div class="exports">
+          <button class="btn" data-x="tif" disabled>Elevation .tif</button><button class="btn" data-x="tifslope" disabled>Slope .tif</button>
+          <button class="btn" data-x="geojson" disabled>Layers .geojson</button><button class="btn" data-x="kml" disabled>Outline .kml</button>
+        </div>
+        <p class="hint">GeoTIFF in WGS 84 (EPSG:4326), metres above sea level and slope in degrees. GeoJSON holds contours, roads, water, buildings with heights and trees, with attributes.</p>
+      </div>
+
+      <div class="dl" data-tab="laser" hidden>
+        <div class="grid-2">
+          <div class="field"><label for="lScale">Scale</label><select id="lScale"></select></div>
+          <div class="field"><label for="lThick">Sheet thickness <span class="unit">mm</span></label><input id="lThick" type="number" value="2" min="0.5" max="10" step="0.5"></div>
+          <div class="field"><label for="lSheet">Sheet</label><select id="lSheet"><option value="600x400">600 × 400 mm</option><option value="800x500" selected>800 × 500 mm</option><option value="1000x600">1000 × 600 mm</option><option value="420x297">A3</option><option value="594x420">A2</option></select></div>
+          <div class="field"><label for="lVx">Height × </label><select id="lVx"><option value="1">1 (true)</option><option value="1.5">1.5</option><option value="2" selected>2</option><option value="3">3</option></select></div>
+        </div>
+        <p class="hint" id="lInfo">Build a model to see the plates.</p>
+        <div class="exports">
+          <button class="btn" data-x="lsvg" disabled>Plates .svg</button><button class="btn" data-x="ldxf" disabled>Plates .dxf</button>
+        </div>
+        <p class="hint">Red cuts, blue scores the outline of the next plate for gluing in register, black engraves the plate number. Check the files before cutting.</p>
+      </div>
+      <p class="hint" style="margin-top:12px">Data: elevation © Mapterhorn (Copernicus GLO-30 and national lidar) or Terrarium tiles (AWS); © OpenStreetMap contributors; heights GHS-BUILT-H R2023A, EC JRC; Copernicus Sentinel-2 via Earth Search; water history JRC Global Surface Water. Trees inside woods and from satellite are placed by rule, not measured.</p>
+    </div>
+  </aside>
+
+  <section class="canvas tm-view">
+    <div class="tm-bar">
+      <div class="seg" id="view"><button data-v="persp" class="on">Perspective</button><button data-v="axo">Axo</button><button data-v="plan">Plan</button><button data-v="section">Section</button></div>
+      <div class="tm-sec" id="secBox" hidden>
+        <div class="seg" id="secDir"><button data-v="ns" class="on">N–S</button><button data-v="ew">E–W</button></div>
+        <input type="range" id="secPos" min="-1" max="1" step="0.01" value="0" aria-label="Section position">
+      </div>
+      <span class="spacer"></span>
+      <label class="check tm-grid"><input type="checkbox" id="sGrid" checked>Grid</label>
+    </div>
+    <div class="tm-stage" id="stage">
+      <div class="tm-empty" id="empty"><b>Pick a site and press "Build model".</b><span>Ground, roads, water, trees and buildings come from open data in about half a minute.</span></div>
+      <div class="tm-progress" id="progress" hidden></div>
+      <div class="tm-north" id="north" hidden><svg viewBox="-20 -20 40 40" width="38" height="38"><circle r="18" fill="none" stroke="currentColor" stroke-width="1"/><path d="M0 -14 L5 6 L0 2 L-5 6 Z" fill="currentColor"/></svg><span>N</span></div>
+      <div class="tm-scale" id="scaleNote" hidden></div>
+    </div>
+  </section>
+</main>
+
+<div id="printArea"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/earcut@2.2.4/dist/earcut.min.js"></script>
+<script src="../../assets/atools.js"></script>
+<script src="../../assets/lib/fabric.js"></script>
+<script src="../../assets/lib/ghsl.js"></script>
+<script src="../../assets/lib/model.js"></script>
+<script src="../../assets/lib/utm.js"></script>
+<script src="../../assets/lib/cog.js"></script>
+<script src="../../assets/lib/terrain.js"></script>
+<script src="../../assets/lib/land.js"></script>
+<script src="../../assets/lib/sentinel.js"></script>
+<script src="../../assets/lib/export3d.js"></script>
+<script type="importmap">{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/" } }</script>
+<script type="module" src="app.js"></script>
+</body>
+</html>

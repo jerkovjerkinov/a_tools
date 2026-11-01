@@ -1,0 +1,421 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Site Section · a_tools</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="../../assets/atools.css">
+<style>
+  .canvas.split { display: grid; grid-template-rows: minmax(260px, 1fr) auto; overflow: hidden; }
+  #map { position: relative; min-height: 260px; }
+  .sec { background: var(--surface); border-top: 1px solid var(--line); padding: 12px 16px 16px; overflow: auto; max-height: 56vh; }
+  .sec[hidden] { display: none; }
+  .sec svg { display: block; width: 100%; height: auto; }
+  .sec-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 6px; }
+  .sec-head b { font-size: 14px; }
+  .sec-head span { font-size: 12px; color: var(--muted); }
+  .ab { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; background: #1b1b19; color: #fff; font: 700 12px Inter, sans-serif; border: 2px solid #fff; box-shadow: 0 1px 3px rgba(0,0,0,.3); cursor: grab; }
+  #print-sheet { display: none; }
+  @media print {
+    @page { size: A3 landscape; margin: 10mm; }
+    html, body { background: #fff !important; }
+    body > *:not(#print-sheet) { display: none !important; }
+    #print-sheet { display: block; font-family: Inter, sans-serif; color: #1b1b19; }
+    #print-sheet .ph { display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 1.5px solid #1b1b19; padding-bottom: 3mm; margin-bottom: 6mm; }
+    #print-sheet h1 { margin: 0; font-size: 18pt; }
+    #print-sheet p { margin: 0; font-size: 8.5pt; color: #4a4945; }
+    #print-sheet .pf { margin-top: 4mm; font-size: 7pt; color: #8a8882; }
+  }
+</style>
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="../../index.html"><span class="brand-mark"></span>a_tools</a>
+  <span class="crumb">/ <b>Site Section</b></span>
+  <span class="spacer"></span>
+  <span class="site-pill" id="sitePill" hidden></span>
+</header>
+
+<main class="tool">
+  <aside class="panel">
+    <h1>Site Section</h1>
+    <p class="lead">Cut a section through your site: terrain with spot levels, the buildings you cut in black, and the buildings behind as an elevation. Draw across a street for a street section, along it for a street elevation.</p>
+
+    <div class="group">
+      <p class="group-title"><span class="step">1</span>Section line</p>
+      <div class="row">
+        <input id="q" type="text" placeholder="Search a place">
+        <button id="go" class="btn" style="flex:0 0 auto">Go</button>
+      </div>
+      <button id="draw" class="btn block" style="margin-top:10px">Draw section line</button>
+      <p class="hint" id="drawHint">Tap the start (A) and the end (B) on the map. Drag A or B to adjust. Up to 1 km.</p>
+      <div class="row" style="margin-top:8px">
+        <button id="flip" class="btn" disabled>Look the other way</button>
+        <button id="swap" class="btn" disabled>Swap A and B</button>
+      </div>
+    </div>
+
+    <div class="group">
+      <p class="group-title"><span class="step">2</span>Drawing</p>
+      <div class="grid-2">
+        <div class="field"><label for="depth">Show behind <span class="unit">m</span></label><input id="depth" type="number" min="0" max="300" step="5" value="40"></div>
+        <div class="field"><label for="defH">Height if unknown <span class="unit">m</span></label><input id="defH" type="number" min="2" max="200" step="0.5" value="9"></div>
+      </div>
+      <label class="check"><input id="oGhsl" type="checkbox" checked>Estimate unknown heights from local building heights (GHSL)</label>
+      <div class="field"><span class="label">Vertical scale</span>
+        <div class="seg" id="vex"><button data-v="1" class="on">True</button><button data-v="2">2 ×</button><button data-v="5">5 ×</button></div>
+      </div>
+      <button id="run" class="btn primary block" disabled>Cut section</button>
+      <p class="hint" id="status">Draw a line first.</p>
+    </div>
+
+    <div class="group" id="resGroup" hidden>
+      <p class="group-title">Result</p>
+      <div class="stats">
+        <div class="stat"><b id="sLen">–</b><span>Section length</span></div>
+        <div class="stat"><b id="sDrop">–</b><span>Level difference</span></div>
+        <div class="stat"><b id="sCut">–</b><span>Buildings cut</span></div>
+        <div class="stat"><b id="sHW">–</b><span id="sHWl">Street H / W</span></div>
+      </div>
+      <div class="field" style="margin-top:12px"><label for="scale">Print scale on A3</label>
+        <select id="scale"></select></div>
+      <div class="row">
+        <button id="svg" class="btn">SVG</button>
+        <button id="dxf" class="btn">DXF</button>
+        <button id="print" class="btn">A3 · PDF</button>
+      </div>
+      <p class="hint">DXF is in metres: x along the section from A, y is height above sea level. Layers: TERRAIN, CUT, BEYOND, ROADS, LEVELS, TEXT.</p>
+    </div>
+
+    <div class="group">
+      <p class="hint" style="margin:0">Buildings and streets © OpenStreetMap contributors; heights come from OSM tags (height, levels × 3 m) or the default. Terrain: Copernicus DEM (90 m) via Open-Meteo, so small level changes and retaining walls do not show. Flat roofs.</p>
+    </div>
+  </aside>
+
+  <section class="canvas split">
+    <div id="map"></div>
+    <div class="sec" id="sec" hidden>
+      <div class="sec-head"><b id="secTitle">Section A–B</b><span id="secSub"></span></div>
+      <div id="secSvg"></div>
+    </div>
+  </section>
+</main>
+<div id="print-sheet"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="../../assets/atools.js"></script>
+<script src="../../assets/lib/fabric.js"></script>
+<script src="../../assets/lib/ghsl.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+const rad = Math.PI / 180, MAXL = 1000, SCALES = [100, 200, 500, 1000, 2000, 5000];
+const ROAD_W = { motorway: 14, trunk: 12, primary: 12, secondary: 10, tertiary: 8, unclassified: 6, residential: 7, living_street: 6, service: 4,
+  pedestrian: 6, footway: 2.5, path: 2, cycleway: 2.5, track: 3, motorway_link: 6, trunk_link: 6, primary_link: 6, secondary_link: 6, tertiary_link: 6 };
+let site = ATools.getSite() || { lat: 41.0082, lng: 28.9784, name: 'Istanbul' };
+let A = null, B = null, look = 1, vex = 1, drawing = false, result = null, usedGhsl = false;
+
+// ---------- Map ----------
+const map = ATools.baseMap('map', [site.lat, site.lng], 17);
+const lineLayer = L.layerGroup().addTo(map);
+let mA = null, mB = null;
+$('go').onclick = async () => {
+  const q = $('q').value.trim(); if (!q) return;
+  try { const s = await ATools.geocode(q); if (!s) return alert('Place not found.'); map.setView([s.lat, s.lng], 17); site = s; ATools.setSite(s); }
+  catch { alert('Search failed. Move the map instead.'); }
+};
+$('q').addEventListener('keydown', e => { if (e.key === 'Enter') $('go').click(); });
+
+const ll2m = (p, o) => [(p.lng - o.lng) * 111320 * Math.cos(o.lat * rad), (p.lat - o.lat) * 110540];
+const m2ll = ([x, y], o) => L.latLng(o.lat + y / 110540, o.lng + x / (111320 * Math.cos(o.lat * rad)));
+function lengthAB() { if (!A || !B) return 0; const d = ll2m(B, A); return Math.hypot(d[0], d[1]); }
+function abIcon(t) { return L.divIcon({ className: '', html: `<div class="ab">${t}</div>`, iconSize: [24, 24], iconAnchor: [12, 12] }); }
+function drawLine() {
+  lineLayer.clearLayers();
+  if (!A) return;
+  if (!mA) { mA = L.marker(A, { draggable: true, icon: abIcon('A') }).on('drag', e => { A = e.target.getLatLng(); clamp('A'); drawLine(); }).on('dragend', changed); }
+  mA.setLatLng(A).addTo(lineLayer);
+  if (!B) return;
+  if (!mB) { mB = L.marker(B, { draggable: true, icon: abIcon('B') }).on('drag', e => { B = e.target.getLatLng(); clamp('B'); drawLine(); }).on('dragend', changed); }
+  mB.setLatLng(B).addTo(lineLayer);
+  L.polyline([A, B], { color: '#c8553d', weight: 3, interactive: false }).addTo(lineLayer);
+  // The band behind the line that is drawn as elevation.
+  const o = A, b = ll2m(B, o), L0 = Math.hypot(...b) || 1, u = [b[0] / L0, b[1] / L0], n = [-u[1] * look, u[0] * look], d = +$('depth').value || 0;
+  if (d > 0) L.polygon([[0, 0], b, [b[0] + n[0] * d, b[1] + n[1] * d], [n[0] * d, n[1] * d]].map(p => m2ll(p, o)),
+    { color: '#c8553d', weight: 1, dashArray: '4 4', fillColor: '#c8553d', fillOpacity: .07, interactive: false }).addTo(lineLayer);
+  // View arrows.
+  for (const t of [0.25, 0.5, 0.75]) {
+    const p = [b[0] * t, b[1] * t], q = [p[0] + n[0] * Math.min(25, L0 / 6), p[1] + n[1] * Math.min(25, L0 / 6)];
+    L.polyline([m2ll(p, o), m2ll(q, o)], { color: '#c8553d', weight: 1.5, interactive: false }).addTo(lineLayer);
+  }
+}
+function clamp(which) {
+  const L0 = lengthAB(); if (L0 <= MAXL) return;
+  const fix = which === 'A' ? B : A, mov = which === 'A' ? A : B, d = ll2m(mov, fix), k = MAXL / L0;
+  const p = m2ll([d[0] * k, d[1] * k], fix);
+  if (which === 'A') { A = p; mA.setLatLng(A); } else { B = p; mB.setLatLng(B); }
+}
+function changed() {
+  const ok = A && B && lengthAB() >= 10;
+  $('run').disabled = !ok; $('flip').disabled = $('swap').disabled = !ok;
+  $('status').textContent = ok ? `Line ${Math.round(lengthAB())} m. Cut the section.` : 'Draw a line first.';
+}
+$('draw').onclick = () => {
+  drawing = true; A = B = null; lineLayer.clearLayers(); map.getContainer().style.cursor = 'crosshair';
+  $('draw').textContent = 'Tap A, then B'; changed();
+};
+map.on('click', e => {
+  if (!drawing) return;
+  if (!A) { A = e.latlng; drawLine(); return; }
+  B = e.latlng; clamp('B'); drawing = false; map.getContainer().style.cursor = ''; $('draw').textContent = 'Redraw section line';
+  drawLine(); changed();
+});
+$('flip').onclick = () => { look = -look; drawLine(); if (result) run(); };
+$('swap').onclick = () => { [A, B] = [B, A]; look = -look; drawLine(); if (result) run(); };
+$('depth').addEventListener('change', drawLine);
+document.querySelectorAll('#vex button').forEach(b => b.onclick = () => {
+  document.querySelectorAll('#vex button').forEach(x => x.classList.toggle('on', x === b));
+  vex = +b.dataset.v; if (result) render(result);
+});
+
+// ---------- Geometry ----------
+// Where segment p→q crosses segment a→b: parameter along p→q, or null.
+function cross(p, q, a, b) {
+  const rx = q[0] - p[0], ry = q[1] - p[1], sx = b[0] - a[0], sy = b[1] - a[1], den = rx * sy - ry * sx;
+  if (Math.abs(den) < 1e-12) return null;
+  const t = ((a[0] - p[0]) * sy - (a[1] - p[1]) * sx) / den, u = ((a[0] - p[0]) * ry - (a[1] - p[1]) * rx) / den;
+  return t >= 0 && t <= 1 && u >= 0 && u <= 1 ? t : null;
+}
+// Intervals of the section line (as distances from A) that lie inside a building.
+function cutIntervals(m, L0, b) {
+  const ts = [];
+  [m.outer, ...m.holes].forEach(r => r.forEach((p, i) => { const t = cross([0, 0], b, p, r[(i + 1) % r.length]); if (t != null) ts.push(t * L0); }));
+  ts.sort((x, y) => x - y);
+  const out = [], inside0 = ATFabric.inside([0, 0], m.outer) && !m.holes.some(h => ATFabric.inside([0, 0], h));
+  const pts = inside0 ? [0, ...ts] : ts;
+  if (pts.length % 2) pts.push(L0);
+  for (let i = 0; i + 1 < pts.length; i += 2) if (pts[i + 1] - pts[i] > 0.05) out.push([pts[i], pts[i + 1]]);
+  return out;
+}
+
+async function elevations(points) {
+  const out = [];
+  for (let i = 0; i < points.length; i += 100) {
+    const ch = points.slice(i, i + 100);
+    const j = await ATools.fetchJson(`https://api.open-meteo.com/v1/elevation?latitude=${ch.map(p => p.lat.toFixed(5)).join(',')}&longitude=${ch.map(p => p.lng.toFixed(5)).join(',')}`, {}, 20000);
+    if (!j.elevation || j.elevation.length !== ch.length) throw Object.assign(new Error('elevation'), { why: 'The elevation service gave an incomplete answer.' });
+    out.push(...j.elevation);
+  }
+  return out;
+}
+
+// ---------- Section ----------
+async function run() {
+  if (!A || !B) return;
+  $('run').disabled = true;
+  const o = A, b = ll2m(B, o), L0 = Math.hypot(...b), u = [b[0] / L0, b[1] / L0], n = [-u[1] * look, u[0] * look];
+  const depth = Math.max(0, +$('depth').value || 0), mid = m2ll([b[0] / 2, b[1] / 2], o), R = L0 / 2 + depth + 30;
+  $('status').innerHTML = '<span class="spinner"></span>Loading buildings, streets and terrain…';
+  const NS = 100, prof = [...Array(NS)].map((_, i) => m2ll([b[0] * i / (NS - 1), b[1] * i / (NS - 1)], o));
+  const [osm, ter, gh] = await Promise.allSettled([ATFabric.fetchMasses({ lat: mid.lat, lng: mid.lng }, R, { roads: true }), elevations(prof),
+    $('oGhsl').checked ? ATGhsl.load(o, L0 + depth + 60) : Promise.resolve(null)]);
+  const G = gh.status === 'fulfilled' && gh.value && gh.value.cells ? gh.value : null;
+  const notes = [];
+  if (osm.status !== 'fulfilled' && ter.status !== 'fulfilled') {
+    $('status').textContent = ATools.errorText(osm.reason, 'buildings or terrain'); $('run').disabled = false; return;
+  }
+  // Terrain along the line (flat at 0 if the elevation service failed).
+  // The elevation model rides over roofs in dense blocks: openProfile strips those bumps.
+  let zs = ter.status === 'fulfilled' ? ATFabric.openProfile(ter.value, L0 / (NS - 1)) : null;
+  if (!zs) { zs = Array(NS).fill(0); notes.push(ATools.errorText(ter.reason, 'terrain') + ' Drawn on flat ground.'); }
+  const zAt = t => { const f = Math.max(0, Math.min(NS - 1, t / L0 * (NS - 1))), i = Math.min(NS - 2, Math.floor(f)), w = f - i; return zs[i] * (1 - w) + zs[i + 1] * w; };
+
+  let cut = [], beyond = [], roads = [];
+  if (osm.status === 'fulfilled') {
+    const j = osm.value, ms = ATFabric.masses(j, o, L0 + depth + 60, {   // coordinates are from A, so the box must reach past B
+      defH: +$('defH').value || 9, floorH: 3, ghsl: G });
+    usedGhsl = ms.some(m => m.est === 'ghsl');
+    ms.forEach(m => {
+      const iv = cutIntervals(m, L0, b), h = m.z1 - m.z0, lv = m.tags && m.tags['building:levels'] ? +m.tags['building:levels'] : null, name = m.tags && m.tags.name || '';
+      iv.forEach(([t0, t1]) => cut.push({ t0, t1, h, known: m.known, lv, name, z: Math.min(zAt(t0), zAt(t1), zAt((t0 + t1) / 2)) }));
+      // Elevation behind the line: project the part of the footprint on the look side.
+      const pr = m.outer.map(p => [p[0] * u[0] + p[1] * u[1], p[0] * n[0] + p[1] * n[1]]);
+      const back = pr.filter(([, s]) => s >= -0.01);
+      if (!back.length || depth <= 0) return;
+      const sMin = Math.max(0, Math.min(...back.map(p => p[1])));
+      if (sMin > depth) return;
+      const ts = back.map(p => p[0]).concat(iv.flat());
+      const t0 = Math.max(0, Math.min(...ts)), t1 = Math.min(L0, Math.max(...ts));
+      if (t1 - t0 < 0.3) return;
+      const c = m.outer.reduce((a, p) => [a[0] + p[0] / m.outer.length, a[1] + p[1] / m.outer.length], [0, 0]);
+      beyond.push({ t0, t1, s: sMin, h, c, cutToo: iv.length > 0 });
+    });
+    j.elements.forEach(el => {
+      const t = el.tags || {}; if (!t.highway || !el.geometry) return;
+      const g = el.geometry.map(p => ll2m({ lat: p.lat, lng: p.lon }, o));
+      for (let i = 0; i + 1 < g.length; i++) {
+        const x = cross([0, 0], b, g[i], g[i + 1]);
+        if (x != null) {
+          const dx = g[i + 1][0] - g[i][0], dy = g[i + 1][1] - g[i][1], ang = Math.asin(Math.min(1, Math.abs(dx * u[1] - dy * u[0]) / (Math.hypot(dx, dy) || 1))) / rad;
+          const w = parseFloat(t.width) || (t.lanes ? +t.lanes * 3.25 + (/footway|path|cycleway/.test(t.highway) ? 0 : 3) : ROAD_W[t.highway] || 5);
+          roads.push({ t: x * L0, w: Math.min(60, w), name: t.name || '', kind: t.highway, est: !t.width, ang });
+        }
+      }
+    });
+  } else notes.push(ATools.errorText(osm.reason, 'buildings') + ' Terrain only.');
+
+  // Ground under the buildings behind: one extra elevation call for their centres.
+  if (zs && ter.status === 'fulfilled' && beyond.length) {
+    // The elevation model includes roofs, so take the lowest of the centre and two points 45 m either side along the line.
+    const near = beyond.slice().sort((a, b) => a.s - b.s).slice(0, 100);
+    const pts = near.flatMap(x => [x.c, [x.c[0] - 45 * u[0], x.c[1] - 45 * u[1]], [x.c[0] + 45 * u[0], x.c[1] + 45 * u[1]]]);
+    try { const e = await elevations(pts.map(p => m2ll(p, o))); near.forEach((x, i) => x.z = Math.min(e[3 * i], e[3 * i + 1], e[3 * i + 2])); } catch (e) {}
+  }
+  beyond.forEach(x => { if (x.z == null || x.cutToo) x.z = Math.min(zAt(x.t0), zAt(x.t1), zAt((x.t0 + x.t1) / 2)); });
+  beyond = beyond.filter(x => !x.cutToo || x.s < depth).sort((a, b) => b.s - a.s);   // far first
+
+  if (osm.status === 'fulfilled' && !cut.length && beyond.length < 3 && L0 > 150)
+    notes.push('OpenStreetMap has few or no buildings mapped along this line, so the section may be missing buildings. Check on an aerial photo.');
+  // Street H/W: the main road crossed and the first buildings either side of it.
+  let hw = null;
+  // Only streets the line crosses at more than 45°: a line along a street would measure its length, not its width.
+  const main = roads.filter(r => r.ang > 45 && !/footway|path|cycleway|service|track/.test(r.kind)).sort((a, b) => b.w - a.w)[0];
+  if (main) {
+    const left = cut.filter(c => c.t1 <= main.t).sort((a, b) => b.t1 - a.t1)[0], right = cut.filter(c => c.t0 >= main.t).sort((a, b) => a.t0 - b.t0)[0];
+    if (left && right) { const W = right.t0 - left.t1, H = (left.h + right.h) / 2; if (W > 2 && W < 150) hw = { W, H, a: left.t1, b: right.t0, name: main.name }; }
+  }
+  result = { L0, zs, cut, beyond, roads, hw, notes, A: { lat: A.lat, lng: A.lng }, B: { lat: B.lat, lng: B.lng }, depth, name: site.name || '' };
+  render(result);
+  $('run').disabled = false;
+  $('status').textContent = `${cut.length} building cut${cut.length === 1 ? '' : 's'}, ${beyond.length} behind, ${roads.length} street crossing${roads.length === 1 ? '' : 's'}.` + (notes.length ? ' ' + notes.join(' ') : '');
+}
+
+// ---------- Drawing ----------
+const f1 = x => (Math.round(x * 10) / 10).toFixed(1), lvl = z => (z >= 0 ? '+' : '−') + Math.abs(z).toFixed(2);
+function niceStep(L0) { return [5, 10, 20, 25, 50, 100, 200, 250].find(s => L0 / s <= 10) || 500; }
+
+// Section geometry in drawing units: x = metres from A, y = metres up (exaggerated).
+function sectionSvg(r, { W = 1100, forPrint = null } = {}) {
+  const zmin = Math.min(...r.zs), zmax = Math.max(...r.zs, ...r.cut.map(c => c.z + c.h), ...r.beyond.map(c => c.z + c.h));
+  const base = Math.floor((zmin - 6) / 5) * 5, top = zmax + 8;
+  const pad = 40, sx = forPrint ? forPrint.mmPerM : (W - 2 * pad) / r.L0, sy = sx * vex;
+  const Wd = forPrint ? r.L0 * sx + 2 * pad * 0.25 : W, P = forPrint ? 10 : pad;
+  const H = (top - base) * sy + (forPrint ? 22 : 70);
+  const X = t => P + t * sx, Y = z => (top - z) * sy + (forPrint ? 4 : 10);
+  const fs = forPrint ? 2.6 : 13, sw = forPrint ? 0.18 : 1.1;   // font size and line width in drawing units
+  let o = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${Wd.toFixed(1)} ${H.toFixed(1)}"${forPrint ? ` width="${Wd.toFixed(1)}mm" height="${H.toFixed(1)}mm"` : ''} font-family="Inter, sans-serif">`;
+  o += `<defs><pattern id="hatch" width="${fs * .6}" height="${fs * .6}" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="${fs * .6}" stroke="#b9b5ab" stroke-width="${sw * .6}"/></pattern></defs>`;
+  o += `<rect width="${Wd}" height="${H}" fill="#fff"/>`;
+  // Elevation behind: far to near, lighter when further away.
+  r.beyond.forEach(x => {
+    const k = r.depth ? Math.min(1, x.s / r.depth) : 0, g = Math.round(205 + 35 * k);
+    o += `<rect x="${X(x.t0).toFixed(2)}" y="${Y(x.z + x.h).toFixed(2)}" width="${((x.t1 - x.t0) * sx).toFixed(2)}" height="${(x.h * sy + (Y(base) - Y(x.z)) * 0).toFixed(2)}" fill="rgb(${g},${g - 2},${g - 8})" stroke="#8a8882" stroke-width="${sw * .5}"/>`;
+  });
+  // Ground: hatched below the terrain line.
+  const terr = r.zs.map((z, i) => [X(r.L0 * i / (r.zs.length - 1)), Y(z)]);
+  const gpath = `M${terr.map(p => p.map(v => v.toFixed(2)).join(' ')).join(' L')} L${X(r.L0)} ${Y(base)} L${X(0)} ${Y(base)}Z`;
+  o += `<path d="${gpath}" fill="#fff"/><path d="${gpath}" fill="url(#hatch)"/>`;
+  // Cut buildings (labels after all of them, so none is hidden). Labels claim boxes; one that would overlap another moves up a row or is left out.
+  let labels = '';
+  const boxes = [], tw = (s, k) => String(s).length * fs * k * .56;
+  const claim = (x0, x1, y0, y1) => { if (boxes.some(b => x0 < b[1] && x1 > b[0] && y0 < b[3] && y1 > b[2])) return false; boxes.push([x0, x1, y0, y1]); return true; };
+  r.cut.forEach(c => {
+    o += `<rect x="${X(c.t0).toFixed(2)}" y="${Y(c.z + c.h).toFixed(2)}" width="${((c.t1 - c.t0) * sx).toFixed(2)}" height="${((c.h) * sy + Math.max(0, Y(Math.min(zAtR(r, c.t0), zAtR(r, c.t1))) - Y(c.z))).toFixed(2)}" fill="#1b1b19"/>`;
+    if ((c.t1 - c.t0) * sx > fs * 4 && c.h * sy > fs * 2) labels += `<text x="${(X(c.t0) + fs * .4).toFixed(2)}" y="${(Y(c.z) - fs * .5).toFixed(2)}" font-size="${fs * .75}" fill="#fff">${lvl(c.z)}</text>`;
+    const ht = `${Math.round(c.h)} m${c.lv ? ' · ' + c.lv + ' fl' : ''}${c.known ? '' : '*'}`, cx = X((c.t0 + c.t1) / 2), w2 = tw(ht, .85) / 2;
+    for (let k = 0; k < 2; k++) { const yb = Y(c.z + c.h) - fs * (.45 + k * 1.1); if (claim(cx - w2, cx + w2, yb - fs * .85, yb)) { labels += `<text x="${cx.toFixed(2)}" y="${yb.toFixed(2)}" font-size="${fs * .85}" text-anchor="middle" fill="#4a4945">${ht}</text>`; break; } }
+  });
+  o += `<polyline points="${terr.map(p => p.map(v => v.toFixed(2)).join(',')).join(' ')}" fill="none" stroke="#1b1b19" stroke-width="${sw * 2}"/>`;
+  o += labels;
+  // Streets crossed. Names go in up to three rows below the ground; a name that still collides is left out.
+  const rows = [[], [], []];
+  r.roads.slice().sort((a, b) => b.w - a.w).forEach(rd => {
+    const z = zAtR(r, rd.t);
+    o += `<line x1="${X(rd.t - rd.w / 2).toFixed(2)}" y1="${(Y(z) + fs * .4).toFixed(2)}" x2="${X(rd.t + rd.w / 2).toFixed(2)}" y2="${(Y(z) + fs * .4).toFixed(2)}" stroke="#c8553d" stroke-width="${sw * 2.5}"/>`;
+    if (!rd.name || /footway|path|service/.test(rd.kind)) return;
+    const half = rd.name.length * fs * .8 * .29 + fs * .3, cx = Math.max(P + half, Math.min(X(r.L0) - half, X(rd.t))), k = rows.findIndex(row => row.every(([a, b]) => cx + half < a || cx - half > b));
+    if (k < 0) return;
+    rows[k].push([cx - half, cx + half]);
+    o += `<text x="${cx.toFixed(2)}" y="${(Y(z) + fs * (1.6 + k * 1.05)).toFixed(2)}" font-size="${fs * .8}" text-anchor="middle" fill="#c8553d">${esc(rd.name)}</text>`;
+  });
+  // Street H/W dimension.
+  if (r.hw) {
+    const y = Y(Math.max(zAtR(r, r.hw.a), zAtR(r, r.hw.b)) + Math.min(r.hw.H * .5, 6));
+    o += `<line x1="${X(r.hw.a)}" y1="${y}" x2="${X(r.hw.b)}" y2="${y}" stroke="#2f5d8a" stroke-width="${sw}"/>` +
+      [r.hw.a, r.hw.b].map(t => `<line x1="${X(t)}" y1="${y - fs * .4}" x2="${X(t)}" y2="${y + fs * .4}" stroke="#2f5d8a" stroke-width="${sw}"/>`).join('') +
+      (() => { const s = `W ${f1(r.hw.W)} m · H/W ${(r.hw.H / r.hw.W).toFixed(2)}`, cx = X((r.hw.a + r.hw.b) / 2), w2 = tw(s, .85) / 2;
+        for (let k = 0; k < 3; k++) { const yb = y - fs * (.4 + k * 1.1); if (claim(cx - w2, cx + w2, yb - fs * .85, yb)) return `<text x="${cx}" y="${yb}" font-size="${fs * .85}" text-anchor="middle" fill="#2f5d8a">${s}</text>`; }
+        return ''; })();
+  }
+  // Spot levels.
+  const st = niceStep(r.L0), marks = [0];
+  for (let t = st; t < r.L0 - st * .3; t += st) marks.push(t);
+  marks.push(r.L0);
+  marks.forEach((t, i) => {
+    const z = zAtR(r, t), x = X(t), y = Y(z), hidden = i > 0 && i < marks.length - 1 && r.cut.some(c => t > c.t0 - 1 && t < c.t1 + 1);
+    const anc = i === 0 ? 'start' : i === marks.length - 1 ? 'end' : 'middle', tx = i === 0 ? x - fs * .35 : i === marks.length - 1 ? x + fs * .35 : x;   // the end levels stay inside the frame
+    const lw2 = tw(lvl(z), .8), lx0 = anc === 'start' ? tx : anc === 'end' ? tx - lw2 : tx - lw2 / 2;
+    if (!hidden && claim(lx0, lx0 + lw2, y - fs * 1.6, y)) o += `<path d="M${x} ${y} l${-fs * .35} ${-fs * .6} h${fs * .7}Z" fill="#1b1b19"/><text x="${tx}" y="${y - fs * .8}" font-size="${fs * .8}" text-anchor="${anc}">${lvl(z)}</text>`;
+    o += `<line x1="${x}" y1="${Y(base)}" x2="${x}" y2="${Y(base) + fs * .5}" stroke="#1b1b19" stroke-width="${sw * .6}"/><text x="${x}" y="${Y(base) + fs * 1.5}" font-size="${fs * .75}" text-anchor="middle" fill="#8a8882">${Math.round(t)}</text>`;
+  });
+  o += `<line x1="${X(0)}" y1="${Y(base)}" x2="${X(r.L0)}" y2="${Y(base)}" stroke="#1b1b19" stroke-width="${sw * .6}"/>`;
+  o += `<text x="${X(0)}" y="${Y(base) + fs * 3}" font-size="${fs * 1.1}" font-weight="700">A</text><text x="${X(r.L0)}" y="${Y(base) + fs * 3}" font-size="${fs * 1.1}" font-weight="700" text-anchor="end">B</text>`;
+  o += `<text x="${X(r.L0 / 2)}" y="${Y(base) + fs * 3}" font-size="${fs * .75}" text-anchor="middle" fill="#8a8882">Datum ${lvl(base)} m · distances from A in m${vex > 1 ? ` · heights × ${vex}` : ''}${r.cut.some(c => !c.known) ? ' · * height not in OSM' : ''}</text>`;
+  return o + '</svg>';
+}
+function zAtR(r, t) { const NS = r.zs.length, f = Math.max(0, Math.min(NS - 1, t / r.L0 * (NS - 1))), i = Math.min(NS - 2, Math.floor(f)), w = f - i; return r.zs[i] * (1 - w) + r.zs[i + 1] * w; }
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+
+function render(r) {
+  $('sec').hidden = false;
+  $('secSvg').innerHTML = sectionSvg(r);
+  $('secTitle').textContent = `Section A–B · ${Math.round(r.L0)} m`;
+  $('secSub').textContent = `${r.name ? r.name + ' · ' : ''}looking ${compass(r)} · ${r.depth} m shown behind`;
+  $('sLen').textContent = Math.round(r.L0) + ' m';
+  $('sDrop').textContent = f1(Math.max(...r.zs) - Math.min(...r.zs)) + ' m';
+  $('sCut').textContent = r.cut.length;
+  $('sHW').textContent = r.hw ? (r.hw.H / r.hw.W).toFixed(2) : '–';
+  $('sHWl').textContent = r.hw ? `H/W at ${r.hw.name || 'the street'} (W ${f1(r.hw.W)} m)` : 'Street H / W (draw across a street)';
+  const fit = SCALES.filter(s => r.L0 * 1000 / s <= 395);
+  $('scale').innerHTML = (fit.length ? fit : [SCALES[SCALES.length - 1]]).map((s, i) => `<option value="${s}"${i === 0 ? ' selected' : ''}>1:${s}</option>`).join('');
+  $('resGroup').hidden = false;
+  setTimeout(() => map.invalidateSize(), 0);
+}
+function compass(r) {
+  const b = ll2m(r.B, r.A), az = (Math.atan2(-b[1] * look, b[0] * look) / rad + 360) % 360;   // direction of the view normal
+  return ['north', 'north-east', 'east', 'south-east', 'south', 'south-west', 'west', 'north-west'][Math.round(az / 45) % 8];
+}
+
+// ---------- Exports ----------
+$('run').onclick = run;
+const fileBase = () => `section-${ATools.slug(result.name)}-${Math.round(result.L0)}m`;
+$('svg').onclick = () => result && ATools.download(fileBase() + '.svg', sectionSvg(result), 'image/svg+xml');
+$('dxf').onclick = () => {
+  const r = result; if (!r) return;
+  const o = ['999', 'a_tools site section, metres: x from A along the section, y height above sea level. (c) OpenStreetMap contributors; Copernicus DEM via Open-Meteo.', '0', 'SECTION', '2', 'ENTITIES'];
+  const poly = (layer, pts, closed) => { o.push('0', 'POLYLINE', '8', layer, '66', '1', '70', closed ? '1' : '0'); pts.forEach(([x, y]) => o.push('0', 'VERTEX', '8', layer, '10', x.toFixed(3), '20', y.toFixed(3))); o.push('0', 'SEQEND', '8', layer); };
+  const text = (layer, x, y, h, s) => o.push('0', 'TEXT', '8', layer, '10', x.toFixed(3), '20', y.toFixed(3), '40', String(h), '1', String(s).replace(/[^\x20-\x7e]/g, '?'));
+  poly('TERRAIN', r.zs.map((z, i) => [r.L0 * i / (r.zs.length - 1), z]), false);
+  r.beyond.forEach(x => poly('BEYOND', [[x.t0, x.z], [x.t1, x.z], [x.t1, x.z + x.h], [x.t0, x.z + x.h]], true));
+  r.cut.forEach(c => { const zb = Math.min(zAtR(r, c.t0), zAtR(r, c.t1)); poly('CUT', [[c.t0, zb], [c.t1, zb], [c.t1, c.z + c.h], [c.t0, c.z + c.h]], true); text('TEXT', (c.t0 + c.t1) / 2, c.z + c.h + 1, 1, `${Math.round(c.h)} m`); });
+  r.roads.forEach(rd => { const z = zAtR(r, rd.t); poly('ROADS', [[rd.t - rd.w / 2, z], [rd.t + rd.w / 2, z]], false); if (rd.name) text('TEXT', rd.t, z - 2.5, 1, rd.name); });
+  const st = niceStep(r.L0); for (let t = 0; t <= r.L0 + 1e-6; t += st) { const z = zAtR(r, t); text('LEVELS', t, z + 1.2, 1.2, lvl(z)); }
+  text('LEVELS', r.L0, zAtR(r, r.L0) + 1.2, 1.2, lvl(zAtR(r, r.L0)));
+  text('TEXT', 0, Math.min(...r.zs) - 6, 2, 'A'); text('TEXT', r.L0, Math.min(...r.zs) - 6, 2, 'B');
+  o.push('0', 'ENDSEC', '0', 'EOF');
+  ATools.download(fileBase() + '.dxf', o.join('\n'), 'application/dxf');
+};
+$('print').onclick = () => {
+  const r = result; if (!r) return;
+  const S = +$('scale').value, mmPerM = 1000 / S;
+  $('print-sheet').innerHTML = `<div class="ph"><div><h1>Section A–B</h1><p>${esc(r.name)} · ${Math.round(r.L0)} m · looking ${compass(r)} · scale 1:${S} on A3${vex > 1 ? ` · heights × ${vex}` : ''}</p></div>
+    <p>A ${r.A.lat.toFixed(5)}, ${r.A.lng.toFixed(5)} → B ${r.B.lat.toFixed(5)}, ${r.B.lng.toFixed(5)} · a_tools</p></div>
+    ${sectionSvg(r, { forPrint: { mmPerM } })}
+    <p class="pf">Buildings and streets © OpenStreetMap contributors (heights from tags${usedGhsl ? ', else estimated from GHS-BUILT-H 2018, EC JRC (CC BY 4.0)' : ''}, else ${$('defH').value} m). Terrain: Copernicus DEM 90 m via Open-Meteo. Early design and education use; survey before construction.</p>`;
+  window.print();
+};
+</script>
+</body>
+</html>
