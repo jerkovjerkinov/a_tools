@@ -15,10 +15,12 @@ const CAR = /^(motorway|trunk|primary|secondary|tertiary|residential|unclassifie
 const WATERWAY = { river: [15, 2.5], canal: [10, 2], stream: [3, 1], ditch: [1.5, 0.6], drain: [1.5, 0.6], tidal_channel: [6, 1] };
 const num = v => { const n = parseFloat(String(v || '').replace(',', '.')); return isFinite(n) ? n : null; };
 
-function query(bb, { buildings = true } = {}) {
-  return `[out:json][timeout:180][maxsize:1073741824][bbox:${bb}];
-    ${buildings ? '(way["building"];relation["building"]["type"="multipolygon"];)->.b; .b out geom;' : ''}
-    way["highway"]["highway"!~"^(proposed|construction|platform|corridor|elevator|raceway|abandoned)$"]; out geom;
+// Two Overpass queries run side by side: buildings, and everything else. Smaller queries get through busy servers
+// more often, and one failing still leaves the other.
+function query(bb, { buildings = true, part = 'all' } = {}) {
+  const head = `[out:json][timeout:90][bbox:${bb}];`;
+  const B = '(way["building"];relation["building"]["type"="multipolygon"];)->.b; .b out geom;';
+  const rest = `way["highway"]["highway"!~"^(proposed|construction|platform|corridor|elevator|raceway|abandoned)$"]; out geom;
     way["railway"~"^(rail|light_rail|tram|subway|narrow_gauge|preserved)$"]; out geom;
     (way["natural"~"^(water|coastline|wetland|beach|sand|bare_rock|scree)$"];relation["natural"~"^(water|wetland)$"];
      way["waterway"~"^(river|stream|canal|ditch|drain|tidal_channel|riverbank|dock)$"];relation["waterway"="riverbank"];
@@ -28,11 +30,19 @@ function query(bb, { buildings = true } = {}) {
      way["landuse"~"^(forest|orchard|vineyard|grass|meadow|cemetery|farmland|allotments|recreation_ground|village_green|plant_nursery)$"];
      relation["landuse"~"^(forest|orchard|vineyard|meadow|farmland|grass)$"];
      way["leisure"~"^(park|garden|pitch|golf_course|nature_reserve|playground)$"];relation["leisure"~"^(park|garden|golf_course)$"];)->.g; .g out geom;`;
+  if (part === 'buildings') return head + B;
+  if (part === 'rest') return head + rest;
+  return head + (buildings ? B : '') + rest;
 }
+// → { elements, osm3s, failed: ['buildings' | 'rest'] }; throws only when every part failed.
 async function load(o, half, opts = {}) {
   const L = ATUtm.local(o), sw = L.ll(-half, -half), ne = L.ll(half, half);
   const bb = [sw.lat, sw.lng, ne.lat, ne.lng].map(x => x.toFixed(6)).join(',');
-  return ATools.overpass(query(bb, opts), 200000);
+  const parts = opts.buildings === false ? ['rest'] : ['buildings', 'rest'];
+  const res = await Promise.allSettled(parts.map(part => ATools.overpass(query(bb, { part }), 60000)));
+  const ok = res.filter(r => r.status === 'fulfilled').map(r => r.value);
+  if (!ok.length) throw res[0].reason;
+  return { elements: ok.flatMap(j => j.elements || []), osm3s: ok[0].osm3s, failed: parts.filter((_, i) => res[i].status !== 'fulfilled') };
 }
 
 // Join member ways of a multipolygon into closed rings (members are often split into several ways).
