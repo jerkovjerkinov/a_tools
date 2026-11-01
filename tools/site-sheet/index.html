@@ -148,6 +148,7 @@
 <script src="../../assets/lib/sun.js"></script>
 <script src="../../assets/lib/climate.js"></script>
 <script src="../../assets/lib/fabric.js"></script>
+<script src="../../assets/lib/ghsl.js"></script>
 <script src="../../assets/lib/axo.js"></script>
 <script>
 const $ = id => document.getElementById(id);
@@ -204,7 +205,8 @@ async function make() {
   };
   $('sunLegend').innerHTML = `<span><i style="background:#c0392b"></i>21 Jun</span><span><i style="background:#5d8a3c"></i>20 Mar</span><span><i style="background:#2f5d8a"></i>21 Dec</span><span>Times UTC${tz >= 0 ? '+' : ''}${tz}</span>`;
 
-  const [fab, cli] = await Promise.allSettled([ATFabric.load(s, R), ATClimate.fetchYear(s, year)]);
+  const [fab, cli, gh] = await Promise.allSettled([ATFabric.load(s, R), ATClimate.fetchYear(s, year), ATGhsl.load(s, Math.min(R, 250))]);
+  const G = gh.status === 'fulfilled' && gh.value.cells ? gh.value : null;
   const geo = fab.status === 'fulfilled' ? fab.value : null, d = cli.status === 'fulfilled' ? cli.value : null;
 
   let st = null;
@@ -213,8 +215,8 @@ async function make() {
     st = ATFabric.stats(geo);
     $('fgSub').textContent = `${2 * R >= 1000 ? (2 * R / 1000) + ' km' : 2 * R + ' m'} square around the site · ${st.count.toLocaleString('en-US')} buildings`;
     $('fgLegend').innerHTML = `<span><i style="background:#111"></i>Buildings</span><span><i style="background:#c9c6bd"></i>Streets</span><span><i style="background:#dfe8d6"></i>Green</span><span><i style="background:#d6e3ee"></i>Water</span><span><i style="background:#c8553d;border-radius:50%"></i>Site</span>`;
-    // Massing of the nearest 500 m, from the same download; unknown heights default to 3 floors.
-    const RA = Math.min(R, 250), ms = ATFabric.masses(geo.raw, s, RA, { defH: 9, floorH: 3 });
+    // Massing of the nearest 500 m, from the same download; unknown heights from GHSL, else 3 floors.
+    const RA = Math.min(R, 250), ms = ATFabric.masses(geo.raw, s, RA, { defH: 9, floorH: 3, ghsl: G });
     const known = ms.filter(m => m.known).length;
     $('axo').innerHTML = `<svg viewBox="0 0 1000 820">${ATAxo.svg(ms, { R: RA, H: 820 })}</svg>`;
     try { // crop to the drawing so the model fills its panel
@@ -257,7 +259,7 @@ async function make() {
     : `<b>Sun.</b> The winter sun barely rises (${Math.round(sun.lowNoon)}° at noon); daylight, not shading, drives the design for much of the year.`);
   if (d) notes.push(...ATClimate.notes(d));
   $('notes').innerHTML = notes.map((t, i) => `<li data-i="${i + 1}"><span>${t}</span></li>`).join('');
-  $('bFoot').textContent = `Sources: © OpenStreetMap contributors · Open-Meteo, ERA5 reanalysis ${year} · sun position computed. Early design guidance, not for permits or engineering. Made with a_tools.`;
+  $('bFoot').textContent = `Sources: © OpenStreetMap contributors${G ? ' · GHS-BUILT-H 2018, EC JRC (heights not in OSM)' : ''} · Open-Meteo, ERA5 reanalysis ${year} · sun position computed. Early design guidance, not for permits or engineering. Made with a_tools.`;
 
   $('status').textContent = geo && d ? 'Sheet ready.' : 'Sheet made with missing parts; see the messages on the board.';
   $('make').disabled = false;

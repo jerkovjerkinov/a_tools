@@ -248,7 +248,7 @@ function build(j, o, R) {
     if (minaret || (t.man_made === 'tower' && !t.building && !t['building:part'])) {
       const c = el.type === 'node' ? P(el) : el.geometry ? centroid(el.geometry.map(P)) : null;
       const sh = num(t.height) || (minaret ? 45 : t['tower:type'] === 'defensive' ? 14 : 15), cone = num(t['roof:height']) || (minaret ? Math.max(4, sh * .15) : 3);
-      if (c && inside(c)) D.spires.push({ h: sh - (num(t.height) ? cone : 0), cone, p: c, r: minaret ? 1.75 : el.type === 'node' ? (t['tower:type'] === 'defensive' ? 4.5 : 2.5) : Math.max(1.5, Math.sqrt(Math.abs(area(el.geometry.map(P))) / Math.PI)), minaret, name: t.name || '' });
+      if (c && inside(c)) D.spires.push({ h: sh - (num(t.height) ? cone : 0), cone, auto: minaret && !num(t.height), p: c, r: minaret ? 1.75 : el.type === 'node' ? (t['tower:type'] === 'defensive' ? 4.5 : 2.5) : Math.max(1.5, Math.sqrt(Math.abs(area(el.geometry.map(P))) / Math.PI)), minaret, name: t.name || '' });
       if (minaret || el.type === 'node') return;
     }
     // City walls: each segment becomes a thin wall block.
@@ -464,6 +464,10 @@ function heightOf(b, mode) {
   if (t.building === 'mosque' || (t.amenity === 'place_of_worship' && t.religion === 'muslim')) return { h: Math.round(Math.min(24, Math.max(9, 4 + Math.sqrt(b.a) * 0.2))), m, known: false };
   if (b.tomb || /^(tomb|mausoleum)$/.test(t.building || '') || t.historic === 'tomb') return { h: Math.round(Math.min(14, Math.max(5, Math.sqrt(b.a) * 0.9))), m, known: false };
   if (/^(church|cathedral|chapel|synagogue)$/.test(t.building || '') || t.amenity === 'place_of_worship') return { h: 14, m, known: false };
+  if (b.part && b.dome && b.parent) {   // an untagged dome part: a drum above the body, then the dome (Selimiye: about 46 m)
+    const Dm = 2 * Math.sqrt(b.a / Math.PI), body = heightOf(b.parent, mode).h;
+    return { h: body + 0.7 * Dm, m, known: false, autoDomeH: 0.45 * Dm };
+  }
   if (b.part) return { h: Math.max(m + 3.2, b.parent ? heightOf(b.parent, mode).h : 9), m, known: false };
   let fl;
   const g = mode === 'est' && data && data.ghsl ? data.ghsl.at(b.c[0], b.c[1]) : 0;
@@ -530,7 +534,12 @@ function drawing() {
   const depth = (x, y) => x * f[0] + y * f[1];
   const proj = (x, y, z = 0) => [x * r[0] + y * r[1], -(x * f[0] + y * f[1]) * KY - z * KZ];
   const gf = groundFn(D, ex), gz = gf || (() => 0), hasT = !!gf;
-  D.blds.forEach(b => { const hh = heightOf(b, mode); b.h = hh.h; b.m = hh.m || 0; b.known = hh.known; b.z0 = hasT ? Math.min(...b.outer.map(p => gz(p[0], p[1]))) : 0; });
+  D.blds.forEach(b => { const hh = heightOf(b, mode); b.h = hh.h; b.m = hh.m || 0; b.known = hh.known; b.autoDomeH = hh.autoDomeH || 0; b.z0 = hasT ? Math.min(...b.outer.map(p => gz(p[0], p[1]))) : 0; });
+  // Minarets without a height scale with their mosque: 1.45 × its top, at least 45 m (Selimiye about 67 m, real 71 m).
+  D.spires.filter(sp => sp.auto).forEach(sp => {
+    const tops = D.blds.filter(b => (b.mosque || (b.parent && (b.parent.t.building === 'mosque' || b.parent.t.religion === 'muslim')) || b.t.building === 'mosque') && Math.hypot(b.c[0] - sp.p[0], b.c[1] - sp.p[1]) < 90).map(b => b.h);
+    const H = Math.max(45, 1.45 * Math.max(0, ...tops)); sp.cone = Math.max(4, H * 0.15); sp.h = H - sp.cone;
+  });
   const seaZ = hasT ? Math.max(-6, -D.terr.min * ex) : 0, tMax = hasT ? D.terr.range * ex : 0;
   const topZ = Math.max(tMax + 15, Math.min(tMax + 80, Math.max(20, ...D.blds.map(b => b.z0 + b.h))));
   const T0 = Math.max(10, R * 0.04), zb = Math.min(0, seaZ) - T0;   // slab bottom
@@ -624,7 +633,8 @@ function drawing() {
   }
 
   // Buildings and trees, far to near.
-  const items = D.blds.map(b => [depth(b.c[0], b.c[1]), 0, b]);
+  // A part standing on a kept outline (a dome on the prayer hall) is drawn right after that outline.
+  const items = D.blds.map(b => [b.parent && !b.parent.hidden ? Math.min(depth(b.c[0], b.c[1]), depth(b.parent.c[0], b.parent.c[1]) - 0.02) : depth(b.c[0], b.c[1]), 0, b]);
   if (showTr) D.trees.forEach(p => items.push([depth(p[0], p[1]), 1, p]));
   D.spires.forEach(sp => items.push([depth(sp.p[0], sp.p[1]) - 0.01, 2, sp]));   // just in front of the building they stand on
   items.sort((a, b) => b[0] - a[0]);
@@ -664,7 +674,7 @@ function drawing() {
     const per = b.outer.reduce((s, p, i) => { const q = b.outer[(i + 1) % b.outer.length]; return s + Math.hypot(q[0] - p[0], q[1] - p[1]); }, 0);
     const round = 4 * Math.PI * b.a / (per * per) > 0.85;   // a drum: the dome covers it
     const rr = dm ? Math.sqrt(b.a / Math.PI) * (round ? 0.95 : b.mosque ? 0.55 : 0.92) : 0;
-    const domeH = b.dome ? Math.min(num(b.t['roof:height']) || Math.min(rr, (b.h - b.m) * 0.45), b.h - b.m - 1) : b.mosque ? rr * (round ? 1 : 0.9) : 0;
+    const domeH = b.dome ? Math.min(num(b.t['roof:height']) || b.autoDomeH || Math.min(rr, (b.h - b.m) * 0.45), b.h - b.m - 1) : b.mosque ? rr * (round ? 1 : 0.9) : 0;
     const pyr = !dm && !b.wall && /^(pyramidal|cone|conical)$/.test(rs);
     const pyrH = pyr ? Math.max(0, Math.min(num(b.t['roof:height']) || Math.min(b.h * 0.3, Math.sqrt(b.a) * 0.5), b.h - b.m - 1)) : 0;
     // A tagged height is the top of the roof; an estimated body height gets its dome on top.
@@ -711,7 +721,7 @@ function drawing() {
   // Labels: a pill on a leader line; staggered when two would collide.
   if (showLb) {
     const placed = [];
-    D.labels.filter(l => !hidden.has(l.name)).map(l => ({ ...l, z: l.b ? l.b.z0 + l.b.h : gz(l.p[0], l.p[1]) })).sort((a, b) => depth(b.p[0], b.p[1]) - depth(a.p[0], a.p[1])).forEach(l => {
+    D.labels.filter(l => !hidden.has(l.name)).map(l => ({ ...l, z: l.b ? l.b.z0 + Math.max(l.b.h, ...D.blds.filter(q => q.parent === l.b).map(q => q.h)) : gz(l.p[0], l.p[1]) })).sort((a, b) => depth(b.p[0], b.p[1]) - depth(a.p[0], a.p[1])).forEach(l => {
       const [X, Y] = T(l.p[0], l.p[1], l.z), wd = l.name.length * 7.1 + 18;
       let ly = Y - (l.b ? 46 : 30);
       for (let k = 0; k < 6; k++) { const hit = placed.find(([px, py, pw]) => Math.abs(px - X) < (pw + wd) / 2 + 6 && Math.abs(py - ly) < 22); if (!hit) break; ly = hit[1] - 24; }
@@ -733,6 +743,8 @@ function drawing() {
   yy += 50; o += `<text x="${PX}" y="${yy}" font-size="12" letter-spacing="2" font-weight="700" fill="${C.ink}">LEGEND</text>`;
   const leg = [['Building', C.roof, C.wallDark]];
   if (D.blds.some(b => b.lm)) leg.push(['Landmark', C.lmRoof, C.lmDark]);
+  if (D.blds.some(b => b.wall)) leg.push(['City or castle wall', C.lmLit, C.lmDark]);
+  if (D.heritage.length) leg.push(['Historic site', mix(C.plaza, C.lmRoof, .25), mix(C.plaza, C.lmRoof, .25)]);
   if (D.roads.some(x => !x.ped)) leg.push(['Street', C.road, C.roadedge]);
   if (D.roads.some(x => x.ped)) leg.push(['Pedestrian street, path', C.ped, C.roadedge]);
   if (D.plaza.length) leg.push(['Square', C.plaza, C.plaza]);

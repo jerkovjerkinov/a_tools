@@ -58,6 +58,7 @@ const runBtn = async (p, id = 'run') => { await p.click('#' + id); await p.waitF
     await runBtn(p);
     const st = await p.textContent('#status'), stats = await p.$$eval('.stat', x => x.map(e => e.innerText.replace(/\s+/g, ' ')).join(' | '));
     ok(/14 building cuts/.test(st), 'Site Section cuts all 14 buildings on a long line: ' + st.trim());
+    ok(/H\/W at Test Caddesi/.test(stats), 'Site Section measures H/W at the street it crosses');
     const lv = parseFloat((stats.match(/([\d.]+) m Level difference/) || [])[1]);
     ok(lv > 14 && lv < 20, `Site Section ground follows streets, not roofs (level difference ${lv} m, slope alone 17.4 m)`);
     ok(!p.errs.length, 'Site Section no errors');
@@ -65,17 +66,20 @@ const runBtn = async (p, id = 'run') => { await p.click('#' + id); await p.waitF
   }
 
   // 3. Isometric Map on real OSM extracts (ODbL): Çimenlik Kalesi and Süleymaniye Camii.
-  for (const name of ['cimenlik', 'suleymaniye']) {
+  for (const name of ['cimenlik', 'suleymaniye', 'selimiye']) {
     const J = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', name + '.json')));
-    const site = { lat: (J.bbox[0] + J.bbox[2]) / 2, lng: (J.bbox[1] + J.bbox[3]) / 2, name };
+    const site = J.bbox ? { lat: (J.bbox[0] + J.bbox[2]) / 2, lng: (J.bbox[1] + J.bbox[3]) / 2, name } : { lat: 41.6781, lng: 26.5592, name };
     const p = await page(browser, 'tools/iso-map/index.html', { osm: J, elev: null, site });
     await p.click('#size button[data-v="300"]'); await runBtn(p);
     const s = await p.evaluate(() => ({ walls: data.blds.filter(b => b.wall).length, castleArea: data.blds.filter(b => b.t.historic === 'castle' && !b.t.building && !b.wall).length,
       heritage: data.heritage.length, domes: data.blds.filter(b => b.mosque || b.dome).map(b => ({ part: !!b.part, mosque: !!b.mosque, tomb: !!b.tomb, h: b.h, top: b.geo && b.geo.top, z1: b.geo && b.geo.z1 })),
-      minarets: data.spires.filter(sp => sp.minaret).map(sp => [sp.h, sp.cone]), tris: model3d().parts.reduce((n, q) => n + q.tris.length, 0) }));
+      minarets: data.spires.filter(sp => sp.minaret).map(sp => [sp.h, sp.cone]), domeParts: data.blds.filter(b => b.part && b.dome && b.parent).map(b => [b.h, b.parent.h, b.parent.hidden]), tris: model3d().parts.reduce((n, q) => n + q.tris.length, 0) }));
     if (name === 'cimenlik') {
       ok(s.walls > 20, `Çimenlik: city walls drawn as wall blocks (${s.walls})`);
       ok(s.castleArea === 0 && s.heritage > 0, 'Çimenlik: the castle area is ground, not an extruded building');
+    } else if (name === 'selimiye') {
+      ok(s.domeParts.length && s.domeParts.every(([h, ph]) => h > ph + 15), `Selimiye: the untagged dome part rises above the prayer hall (${JSON.stringify(s.domeParts)})`);
+      ok(s.minarets.length === 4 && s.minarets.every(([h, c]) => h + c > 60), `Selimiye: minaret nodes scaled to the mosque (${JSON.stringify(s.minarets.map(([h, c]) => Math.round(h + c)))} m)`);
     } else {
       const d = s.domes.find(x => x.part);
       ok(d && d.top === 53 && d.z1 < 45, `Süleymaniye: dome on the main part, top 53 m (${JSON.stringify(d)})`);

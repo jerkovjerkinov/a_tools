@@ -53,6 +53,7 @@
         <div class="field"><label for="h">Height <span class="unit">m</span></label><input id="h" type="number" min="1" max="500" step="0.5" value="15"></div>
         <div class="field"><label for="defH">Others, if unknown <span class="unit">m</span></label><input id="defH" type="number" min="2" max="200" step="0.5" value="9"></div>
       </div>
+      <label class="check"><input id="oGhsl" type="checkbox" checked>Estimate unknown heights from local building heights (GHSL)</label>
     </div>
 
     <div class="group">
@@ -96,7 +97,7 @@
         <button id="png" class="btn" disabled>Map · PNG</button>
         <button id="print" class="btn">PDF</button>
       </div>
-      <p class="hint">Buildings and heights © OpenStreetMap contributors; heights are often missing, so check the default. Flat ground, flat roofs, no trees. Sun every 10 minutes.</p>
+      <p class="hint">Buildings and heights © OpenStreetMap contributors; heights are often missing. Unknown heights are estimated from GHS-BUILT-H 2018 (EC JRC, CC BY 4.0) when that box is ticked, else the default. Flat ground, flat roofs, no trees. Sun every 10 minutes.</p>
     </div>
   </aside>
 
@@ -111,6 +112,7 @@
 <script src="../../assets/atools.js"></script>
 <script src="../../assets/lib/sun.js"></script>
 <script src="../../assets/lib/fabric.js"></script>
+<script src="../../assets/lib/ghsl.js"></script>
 <script>
 const $ = id => document.getElementById(id);
 const rad = Math.PI / 180, MARGIN = 120, STEP = 10;   // metres of neighbours outside the square; minutes per sun step
@@ -215,8 +217,8 @@ async function run() {
   $('status').innerHTML = '<span class="spinner"></span>Loading neighbouring buildings…';
   let masses = [], note = '';
   try {
-    const j = await ATFabric.fetchMasses(s, R + MARGIN);
-    masses = ATFabric.masses(j, s, R + MARGIN, { defH: +$('defH').value || 9, floorH: 3 });
+    const [j, G] = await Promise.all([ATFabric.fetchMasses(s, R + MARGIN), $('oGhsl').checked ? ATGhsl.load(s, R + MARGIN).catch(() => null) : null]);
+    masses = ATFabric.masses(j, s, R + MARGIN, { defH: +$('defH').value || 9, floorH: 3, ghsl: G && G.cells ? G : null });
   } catch (e) {
     if (footprint.length < 3) {   // nothing would cast a shadow: a result would only mislead
       clearResult(); $('status').textContent = ATools.errorText(e, 'neighbouring buildings'); $('run').disabled = false; return;

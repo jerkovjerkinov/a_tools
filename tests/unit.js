@@ -19,6 +19,13 @@ const n = 12, g = [...Array(n * n)].map((_, k) => { const i = k % n, j = Math.fl
 const og = F.openGrid(g, n, 40, 100);
 ok(og.every((z, k) => z - (10 + (k % n)) < 1.5), 'openGrid removes single-cell bumps');
 
+// Nearest-cell staircase: treads of equal values become a straight slope.
+const stairs = [...Array(60)].map((_, i) => 100 + 10 * Math.floor(i / 10));   // 10 m steps every 10 samples
+const ds = F.destair(stairs), jump = Math.max(...ds.slice(1).map((z, i) => Math.abs(z - ds[i])));
+ok(jump < 1.5, `destair turns 10 m cliffs into a slope (largest step ${jump.toFixed(2)} m)`);
+const sg = [...Array(144)].map((_, k) => 50 + 8 * Math.floor((k % 12) / 4) + 8 * Math.floor(Math.floor(k / 12) / 4)), dg = F.destairGrid(sg, 12);
+ok(Math.max(...dg.map((z, k) => k % 12 ? Math.abs(z - dg[k - 1]) : 0)) < 3.5, 'destairGrid smooths a blocky grid');
+
 // Meshes: closed solids with the right volume.
 const vol = t => t.reduce((v, [a, b, c]) => v + (a[0] * (b[1] * c[2] - b[2] * c[1]) - a[1] * (b[0] * c[2] - b[2] * c[0]) + a[2] * (b[0] * c[1] - b[1] * c[0])) / 6, 0);
 const open = t => { const E = new Map(), k = p => p.map(v => (Math.round(v * 1000) / 1000 + 0).toFixed(3)).join(','); t.forEach(tr => { for (let i = 0; i < 3; i++) { const e = k(tr[i]) + '|' + k(tr[(i + 1) % 3]); E.set(e, (E.get(e) || 0) + 1); } });

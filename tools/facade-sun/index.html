@@ -57,6 +57,7 @@
         <div class="field"><label for="h">Height <span class="unit">m</span></label><input id="h" type="number" min="3" max="500" step="0.5" value="15"></div>
         <div class="field"><label for="defH">Others, if unknown <span class="unit">m</span></label><input id="defH" type="number" min="2" max="200" step="0.5" value="9"></div>
       </div>
+      <label class="check"><input id="oGhsl" type="checkbox" checked>Estimate unknown heights from local building heights (GHSL)</label>
     </div>
 
     <div class="group">
@@ -96,7 +97,7 @@
         <button id="svg" class="btn" disabled>Diagram · SVG</button>
         <button id="csv" class="btn" disabled>Table · CSV</button>
       </div>
-      <p class="hint">Buildings and heights © OpenStreetMap contributors; heights are often missing, so check the default. Radiation: Open-Meteo, ERA5 reanalysis. Flat roofs, no trees, no balconies or reveals. Early design guidance only.</p>
+      <p class="hint">Buildings and heights © OpenStreetMap contributors; heights are often missing. Unknown heights are estimated from GHS-BUILT-H 2018 (EC JRC, CC BY 4.0) when that box is ticked, else the default. Radiation: Open-Meteo, ERA5 reanalysis. Flat roofs, no trees, no balconies or reveals. Early design guidance only.</p>
     </div>
   </aside>
 
@@ -111,6 +112,7 @@
 <script src="../../assets/atools.js"></script>
 <script src="../../assets/lib/sun.js"></script>
 <script src="../../assets/lib/fabric.js"></script>
+<script src="../../assets/lib/ghsl.js"></script>
 <script>
 const $ = id => document.getElementById(id);
 const rad = Math.PI / 180, NEAR = 200;   // metres of neighbours that can cast shadows on the facades
@@ -167,15 +169,15 @@ $('pick').onclick = async () => {
   const c = map.getCenter(), at = { lat: c.lat, lng: c.lng };
   $('status').innerHTML = '<span class="spinner"></span>Loading mapped buildings…';
   try {
-    const j = await ATFabric.fetchMasses(at, 150);
-    mapped = { at, list: ATFabric.masses(j, at, 150, { defH: +$('defH').value || 9, floorH: 3 }) };
+    const [j, gh] = await Promise.all([ATFabric.fetchMasses(at, 150), $('oGhsl').checked ? ATGhsl.load(at, 150).then(g => g.cells ? g : null).catch(() => null) : null]);
+    mapped = { at, list: ATFabric.masses(j, at, 150, { defH: +$('defH').value || 9, floorH: 3, ghsl: gh }) };
   } catch (e) { $('status').textContent = ATools.errorText(e, 'buildings') + ' You can draw the footprint instead.'; stopModes(); return; }
   if (!picking) return;
   pickLayer.clearLayers();
   const toLL = ([x, y]) => [at.lat + y / 110540, at.lng + x / (111320 * Math.cos(at.lat * rad))];
   mapped.list.forEach(m => L.polygon(m.outer.map(toLL), { color: '#1b1b19', weight: 1, fillColor: '#8a8882', fillOpacity: .35 })
     .on('click', ev => { L.DomEvent.stopPropagation(ev); stopModes(); pickLayer.clearLayers(); setFootprint(m.outer.map(toLL), m.z1);
-      $('status').textContent = `Picked a mapped building, ${m.known ? 'height from OpenStreetMap' : 'height unknown, set to the default'}. Check the height, then analyse.`; })
+      $('status').textContent = `Picked a mapped building, ${m.known ? 'height from OpenStreetMap' : m.est === 'ghsl' ? 'height not in OpenStreetMap, estimated from local building heights' : 'height unknown, set to the default'}. Check the height, then analyse.`; })
     .addTo(pickLayer));
   $('status').textContent = mapped.list.length ? `${mapped.list.length} buildings shown. Tap yours.` : 'No mapped buildings here. Draw the footprint instead.';
 };
@@ -280,7 +282,7 @@ async function run() {
 
   $('status').innerHTML = '<span class="spinner"></span>Loading neighbours' + (year ? ' and weather…' : '…');
   const [mres, wres] = await Promise.allSettled([
-    ATFabric.fetchMasses(s, NEAR).then(j => ATFabric.masses(j, s, NEAR, { defH: +$('defH').value || 9, floorH: 3 })),
+    Promise.all([ATFabric.fetchMasses(s, NEAR), $('oGhsl').checked ? ATGhsl.load(s, NEAR).then(g => g.cells ? g : null).catch(() => null) : null]).then(([j, gh]) => ATFabric.masses(j, s, NEAR, { defH: +$('defH').value || 9, floorH: 3, ghsl: gh })),
     year ? fetchRadiation(s, year) : Promise.resolve(null)
   ]);
   let masses = [];

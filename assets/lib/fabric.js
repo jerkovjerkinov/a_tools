@@ -98,6 +98,24 @@ function osmHeight(t, defH, floorH) {
   return { h: defH, known: false };
 }
 
+// Height for a building with no height in OSM. Type defaults for monuments and small buildings first, then the
+// GHSL average building height of its 90 m cell (g, metres, 0 when unknown) scaled by footprint area a, with ±1 floor
+// of jitter from the id so blocks don't look uniform; else defH. Returns metres.
+function estimate(t, a, id, g, defH, floorH = 3) {
+  const tt = t['tower:type'] || '';
+  if (tt === 'minaret' || t['building:part'] === 'minaret') return 45;
+  if (t.man_made === 'tower' || t.building === 'tower') return tt === 'clock' ? 18 : 14;
+  if (t.historic === 'castle' || t.building === 'castle') return 20;
+  if (t.building === 'mosque' || (t.amenity === 'place_of_worship' && t.religion === 'muslim')) return Math.round(Math.min(24, Math.max(9, 4 + Math.sqrt(a) * 0.2)));
+  if (/^(church|cathedral|chapel|synagogue)$/.test(t.building || '')) return 14;
+  if (/^(garage|garages|shed|kiosk|roof|hut|carport)$/.test(t.building || '')) return Math.min(3, defH);
+  if (!(g > 0)) return defH;
+  const k = a < 50 ? 0.6 : a < 150 ? 0.9 : a < 600 ? 1 : 1.1, r = Math.abs(Math.round(+String(id).replace(/\D/g, '').slice(-6) || 0)) % 3;
+  let fl = Math.max(a >= 80 ? 2 : 1, Math.round(Math.min(12, Math.max(1, g / 3.1 * k))) + r - 1);
+  if (/^(house|bungalow|detached|semidetached_house)$/.test(t.building || '')) fl = Math.min(fl, 2);
+  return fl * floorH;
+}
+
 // Buildings (and optionally streets) with tags, in a square of half-size R metres.
 async function fetchMasses(site, R, { roads = false } = {}) {
   const dLat = R / 110540, dLng = R / (111320 * Math.cos(site.lat * rad));
@@ -108,8 +126,9 @@ async function fetchMasses(site, R, { roads = false } = {}) {
   return ATools.overpass(q);
 }
 
-// Overpass JSON → [{ outer, holes, z0, z1, known }] in local metres; ground(x, y) gives the terrain height.
-function masses(j, site, R, { defH = 9, floorH = 3, ground = () => 0 } = {}) {
+// Overpass JSON → [{ outer, holes, z0, z1, known, est }] in local metres; ground(x, y) gives the terrain height;
+// ghsl (from ATGhsl.load) estimates unknown heights, est says which source was used ('ghsl' or 'default').
+function masses(j, site, R, { defH = 9, floorH = 3, ground = () => 0, ghsl = null } = {}) {
   const out = [], P = g => xy(g.lat, g.lon, site);
   const inBox = r => r.some(([x, y]) => Math.abs(x) <= R && Math.abs(y) <= R);
   j.elements.forEach(el => {
@@ -125,14 +144,20 @@ function masses(j, site, R, { defH = 9, floorH = 3, ground = () => 0 } = {}) {
         if (p) p.holes.push(hole);
       });
     }
-    const { h, known } = osmHeight(t, defH, floorH);
+    const oh = osmHeight(t, defH, floorH);
     const minH = num(t.min_height) || 0;
     polys.forEach(p => {
       const outer = clean(p.outer, true);
       if (outer.length < 3 || !inBox(outer) || Math.abs(signedArea(outer)) < 2) return;
       const holes = p.holes.map(hh => clean(hh, false)).filter(hh => hh.length >= 3);
       const z0 = Math.min(...outer.map(([x, y]) => ground(x, y)));
-      out.push({ outer, holes, z0: z0 + minH, z1: z0 + Math.max(h, minH + 1), known, tags: t });
+      let h = oh.h, est = null;
+      if (!oh.known) {
+        const a = Math.abs(signedArea(outer)), cx = outer.reduce((s, q) => s + q[0], 0) / outer.length, cy = outer.reduce((s, q) => s + q[1], 0) / outer.length;
+        const g = ghsl ? ghsl.at(cx, cy) : 0;
+        h = estimate(t, a, el.id, g, defH, floorH); est = g > 0 ? 'ghsl' : 'default';
+      }
+      out.push({ outer, holes, z0: z0 + minH, z1: z0 + Math.max(h, minH + 1), known: oh.known, est, tags: t });
     });
   });
   return out;
@@ -142,12 +167,35 @@ function masses(j, site, R, { defH = 9, floorH = 3, ground = () => 0 } = {}) {
 // A morphological opening (running minimum, then running maximum) removes bumps narrower than the window and keeps
 // real slopes, so the ground follows the streets. openProfile: samples along a line, step in metres.
 // openGrid: a row-major n × n grid with spacing step.
+// Open-Meteo returns the nearest 90 m cell, so dense samples come back as flat treads with cliffs between them.
+// destair: each run of equal values becomes one point at the run's middle, joined by straight lines.
+function destair(z) {
+  const n = z.length, mid = [];
+  for (let i = 0; i < n;) { let j = i; while (j + 1 < n && z[j + 1] === z[i]) j++; mid.push([(i + j) / 2, z[i]]); i = j + 1; }
+  if (mid.length < 2) return z.slice();
+  return z.map((_, i) => {
+    if (i <= mid[0][0]) return mid[0][1];
+    if (i >= mid[mid.length - 1][0]) return mid[mid.length - 1][1];
+    let k = 0; while (mid[k + 1][0] < i) k++;
+    const [a, za] = mid[k], [b, zb] = mid[k + 1];
+    return za + (zb - za) * (i - a) / (b - a);
+  });
+}
+// The same on a row-major n × n grid: rows first, then columns.
+function destairGrid(e, n) {
+  const a = e.slice();
+  for (let j = 0; j < n; j++) destair(a.slice(j * n, j * n + n)).forEach((v, i) => a[j * n + i] = v);
+  for (let i = 0; i < n; i++) destair([...Array(n)].map((_, j) => a[j * n + i])).forEach((v, j) => a[j * n + i] = v);
+  return a;
+}
 function openProfile(z, step, win = 60) {
+  z = destair(z);
   const w = Math.max(1, Math.round(win / 2 / step)), n = z.length;
   const run = (a, f) => a.map((_, i) => f(...a.slice(Math.max(0, i - w), Math.min(n, i + w + 1))));
   return run(run(z, Math.min), Math.max);
 }
 function openGrid(e, n, step, win = 200) {
+  e = destairGrid(e, n);
   const w = Math.max(1, Math.round(win / 2 / step));
   const pass = (a, f) => a.map((_, k) => { const i = k % n, j = Math.floor(k / n), v = [];
     for (let b = Math.max(0, j - w); b <= Math.min(n - 1, j + w); b++) for (let c = Math.max(0, i - w); c <= Math.min(n - 1, i + w); c++) v.push(a[b * n + c]);
@@ -155,5 +203,5 @@ function openGrid(e, n, step, win = 200) {
   return pass(pass(e, Math.min), Math.max);
 }
 
-window.ATFabric = { openProfile, openGrid, load, parse, svg, stats, area, xy, signedArea, clean, inside, osmHeight, fetchMasses, masses };
+window.ATFabric = { estimate, destair, destairGrid, openProfile, openGrid, load, parse, svg, stats, area, xy, signedArea, clean, inside, osmHeight, fetchMasses, masses };
 })();

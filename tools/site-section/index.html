@@ -64,6 +64,7 @@
         <div class="field"><label for="depth">Show behind <span class="unit">m</span></label><input id="depth" type="number" min="0" max="300" step="5" value="40"></div>
         <div class="field"><label for="defH">Height if unknown <span class="unit">m</span></label><input id="defH" type="number" min="2" max="200" step="0.5" value="9"></div>
       </div>
+      <label class="check"><input id="oGhsl" type="checkbox" checked>Estimate unknown heights from local building heights (GHSL)</label>
       <div class="field"><span class="label">Vertical scale</span>
         <div class="seg" id="vex"><button data-v="1" class="on">True</button><button data-v="2">2 ×</button><button data-v="5">5 ×</button></div>
       </div>
@@ -107,13 +108,14 @@
 <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="../../assets/atools.js"></script>
 <script src="../../assets/lib/fabric.js"></script>
+<script src="../../assets/lib/ghsl.js"></script>
 <script>
 const $ = id => document.getElementById(id);
 const rad = Math.PI / 180, MAXL = 1000, SCALES = [100, 200, 500, 1000, 2000, 5000];
 const ROAD_W = { motorway: 14, trunk: 12, primary: 12, secondary: 10, tertiary: 8, unclassified: 6, residential: 7, living_street: 6, service: 4,
   pedestrian: 6, footway: 2.5, path: 2, cycleway: 2.5, track: 3, motorway_link: 6, trunk_link: 6, primary_link: 6, secondary_link: 6, tertiary_link: 6 };
 let site = ATools.getSite() || { lat: 41.0082, lng: 28.9784, name: 'Istanbul' };
-let A = null, B = null, look = 1, vex = 1, drawing = false, result = null;
+let A = null, B = null, look = 1, vex = 1, drawing = false, result = null, usedGhsl = false;
 
 // ---------- Map ----------
 const map = ATools.baseMap('map', [site.lat, site.lng], 17);
@@ -217,7 +219,9 @@ async function run() {
   const depth = Math.max(0, +$('depth').value || 0), mid = m2ll([b[0] / 2, b[1] / 2], o), R = L0 / 2 + depth + 30;
   $('status').innerHTML = '<span class="spinner"></span>Loading buildings, streets and terrain…';
   const NS = 100, prof = [...Array(NS)].map((_, i) => m2ll([b[0] * i / (NS - 1), b[1] * i / (NS - 1)], o));
-  const [osm, ter] = await Promise.allSettled([ATFabric.fetchMasses({ lat: mid.lat, lng: mid.lng }, R, { roads: true }), elevations(prof)]);
+  const [osm, ter, gh] = await Promise.allSettled([ATFabric.fetchMasses({ lat: mid.lat, lng: mid.lng }, R, { roads: true }), elevations(prof),
+    $('oGhsl').checked ? ATGhsl.load(o, L0 + depth + 60) : Promise.resolve(null)]);
+  const G = gh.status === 'fulfilled' && gh.value && gh.value.cells ? gh.value : null;
   const notes = [];
   if (osm.status !== 'fulfilled' && ter.status !== 'fulfilled') {
     $('status').textContent = ATools.errorText(osm.reason, 'buildings or terrain'); $('run').disabled = false; return;
@@ -231,7 +235,8 @@ async function run() {
   let cut = [], beyond = [], roads = [];
   if (osm.status === 'fulfilled') {
     const j = osm.value, ms = ATFabric.masses(j, o, L0 + depth + 60, {   // coordinates are from A, so the box must reach past B
-      defH: +$('defH').value || 9, floorH: 3 });
+      defH: +$('defH').value || 9, floorH: 3, ghsl: G });
+    usedGhsl = ms.some(m => m.est === 'ghsl');
     ms.forEach(m => {
       const iv = cutIntervals(m, L0, b), h = m.z1 - m.z0, lv = m.tags && m.tags['building:levels'] ? +m.tags['building:levels'] : null, name = m.tags && m.tags.name || '';
       iv.forEach(([t0, t1]) => cut.push({ t0, t1, h, known: m.known, lv, name, z: Math.min(zAt(t0), zAt(t1), zAt((t0 + t1) / 2)) }));
@@ -253,8 +258,9 @@ async function run() {
       for (let i = 0; i + 1 < g.length; i++) {
         const x = cross([0, 0], b, g[i], g[i + 1]);
         if (x != null) {
+          const dx = g[i + 1][0] - g[i][0], dy = g[i + 1][1] - g[i][1], ang = Math.asin(Math.min(1, Math.abs(dx * u[1] - dy * u[0]) / (Math.hypot(dx, dy) || 1))) / rad;
           const w = parseFloat(t.width) || (t.lanes ? +t.lanes * 3.25 + (/footway|path|cycleway/.test(t.highway) ? 0 : 3) : ROAD_W[t.highway] || 5);
-          roads.push({ t: x * L0, w: Math.min(60, w), name: t.name || '', kind: t.highway, est: !t.width });
+          roads.push({ t: x * L0, w: Math.min(60, w), name: t.name || '', kind: t.highway, est: !t.width, ang });
         }
       }
     });
@@ -270,7 +276,8 @@ async function run() {
 
   // Street H/W: the main road crossed and the first buildings either side of it.
   let hw = null;
-  const main = roads.filter(r => !/footway|path|cycleway|service|track/.test(r.kind)).sort((a, b) => b.w - a.w)[0];
+  // Only streets the line crosses at more than 45°: a line along a street would measure its length, not its width.
+  const main = roads.filter(r => r.ang > 45 && !/footway|path|cycleway|service|track/.test(r.kind)).sort((a, b) => b.w - a.w)[0];
   if (main) {
     const left = cut.filter(c => c.t1 <= main.t).sort((a, b) => b.t1 - a.t1)[0], right = cut.filter(c => c.t0 >= main.t).sort((a, b) => a.t0 - b.t0)[0];
     if (left && right) { const W = right.t0 - left.t1, H = (left.h + right.h) / 2; if (W > 2 && W < 150) hw = { W, H, a: left.t1, b: right.t0, name: main.name }; }
@@ -390,7 +397,7 @@ $('print').onclick = () => {
   $('print-sheet').innerHTML = `<div class="ph"><div><h1>Section A–B</h1><p>${esc(r.name)} · ${Math.round(r.L0)} m · looking ${compass(r)} · scale 1:${S} on A3${vex > 1 ? ` · heights × ${vex}` : ''}</p></div>
     <p>A ${r.A.lat.toFixed(5)}, ${r.A.lng.toFixed(5)} → B ${r.B.lat.toFixed(5)}, ${r.B.lng.toFixed(5)} · a_tools</p></div>
     ${sectionSvg(r, { forPrint: { mmPerM } })}
-    <p class="pf">Buildings and streets © OpenStreetMap contributors (heights from tags or ${$('defH').value} m default). Terrain: Copernicus DEM 90 m via Open-Meteo. Early design and education use; survey before construction.</p>`;
+    <p class="pf">Buildings and streets © OpenStreetMap contributors (heights from tags${usedGhsl ? ', else estimated from GHS-BUILT-H 2018, EC JRC (CC BY 4.0)' : ''}, else ${$('defH').value} m). Terrain: Copernicus DEM 90 m via Open-Meteo. Early design and education use; survey before construction.</p>`;
   window.print();
 };
 </script>

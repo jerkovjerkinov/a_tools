@@ -51,6 +51,7 @@
           <input id="defH" type="number" min="1" max="200" step="0.5" value="9"></div>
       </div>
       <label class="check"><input id="ctx" type="checkbox" checked>Include neighbouring buildings (OpenStreetMap)</label>
+      <label class="check"><input id="oGhsl" type="checkbox" checked>Estimate unknown heights from local building heights (GHSL)</label>
       <p class="hint" id="ctxInfo"></p>
     </div>
 
@@ -103,7 +104,7 @@
         <button id="svg" class="btn">Sun path · SVG</button>
         <button id="print" class="btn">Sheet · PDF</button>
       </div>
-      <p class="note">Neighbour heights come from OpenStreetMap and are often missing. Tap a grey building to set its real height before using results.</p>
+      <p class="note">Neighbour heights come from OpenStreetMap and are often missing; unknown ones are estimated from GHS-BUILT-H 2018 (EC JRC, CC BY 4.0) or set to the default. Tap a grey building to set its real height before using results.</p>
     </div>
   </aside>
   <div class="canvas map"><div id="map" class="fill"></div></div>
@@ -112,6 +113,8 @@
 <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="../../assets/atools.js"></script>
 <script src="../../assets/lib/sun.js"></script>
+<script src="../../assets/lib/fabric.js"></script>
+<script src="../../assets/lib/ghsl.js"></script>
 <script>
 const Sun = ATSun;
 
@@ -264,13 +267,18 @@ async function loadNeighbours() {
   $('ctxInfo').innerHTML = '<span class="spinner"></span>Loading neighbours…';
   const q = `[out:json][timeout:20];way["building"](around:200,${lat},${lng});out geom;`;
   try {
-    const j = await ATools.overpass(q, 30000);
+    const [j, G] = await Promise.all([ATools.overpass(q, 30000), $('oGhsl').checked ? ATGhsl.load({ lat, lng }, 250).then(g => g.cells ? g : null).catch(() => null) : null]);
     const fpC = state.footprint.length ? centroid(state.footprint) : null;
     neighbourLayer.clearLayers();
     let known = 0;
     state.neighbours = j.elements.filter(w => w.geometry && w.geometry.length > 3).map(w => {
       const poly = w.geometry.map(g => [g.lat, g.lon]); poly.pop();
       const hh = osmHeight(w.tags || {}); if (hh.known) known++;
+      if (!hh.known && G) {   // local average building height (GHSL) scaled by footprint
+        const xy = poly.map(p => toXY(p, [lat, lng])), c = centroid(poly), cxy = toXY(c, [lat, lng]);
+        const g = G.at(cxy[0], cxy[1]);
+        if (g > 0) return { poly, h: ATFabric.estimate(w.tags || {}, Math.abs(ATFabric.signedArea(xy)), w.id, g, hh.h, 3), known: false, est: true };
+      }
       return { poly, h: hh.h, known: hh.known };
     }).filter(b => {  // drop the OSM building that sits where the user drew theirs
       if (!fpC) return true;
@@ -279,11 +287,11 @@ async function loadNeighbours() {
     });
     state.neighbours.forEach(b => {
       const poly = L.polygon(b.poly, { color: b.known ? '#4a4945' : '#a09d95', weight: 1, fillColor: '#c9c6bd', fillOpacity: .55 })
-        .bindTooltip(() => `${b.h.toFixed(1)} m${b.known ? '' : ' (assumed)'} · tap to edit`).addTo(neighbourLayer);
+        .bindTooltip(() => `${b.h.toFixed(1)} m${b.known ? '' : b.est ? ' (estimated)' : ' (assumed)'} · tap to edit`).addTo(neighbourLayer);
       poly.on('click', () => {
         if (state.drawing) return;
         const v = prompt('Height of this building (m)', b.h.toFixed(1));
-        if (v !== null && !isNaN(parseFloat(v))) { b.h = parseFloat(v); b.known = true; poly.setStyle({ color: '#4a4945' }); render(); }
+        if (v !== null && !isNaN(parseFloat(v))) { b.h = parseFloat(v); b.known = true; b.est = false; poly.setStyle({ color: '#4a4945' }); render(); }
       });
     });
     $('ctxInfo').textContent = `${state.neighbours.length} buildings within 200 m, ${known} with height data. Tap one to set its height.`;
@@ -312,7 +320,8 @@ document.querySelectorAll('#presets .chip').forEach(b => b.onclick = () => {
 });
 ['t', 'h', 'date', 'tz'].forEach(id => $(id).addEventListener('input', render));
 $('ctx').addEventListener('change', () => { if ($('ctx').checked && !state.neighbours.length) loadNeighbours(); else render(); });
-$('defH').addEventListener('change', () => { state.neighbours.forEach(b => { if (!b.known) b.h = parseFloat($('defH').value) || 9; }); render(); });
+$('oGhsl').addEventListener('change', () => { if ($('ctx').checked) loadNeighbours(); });
+$('defH').addEventListener('change', () => { state.neighbours.forEach(b => { if (!b.known && !b.est) b.h = parseFloat($('defH').value) || 9; }); render(); });
 $('multi').onclick = () => { state.multi = !state.multi; $('multi').classList.toggle('primary', state.multi); render(); };
 $('play').onclick = () => {
   if (state.playing) { clearInterval(state.playing); state.playing = null; $('play').textContent = '▶ Animate day'; return; }
