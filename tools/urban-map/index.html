@@ -20,7 +20,8 @@
   table.cnt { width: 100%; border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; }
   table.cnt td { padding: 4px 3px; border-bottom: 1px solid var(--line); }
   table.cnt td:not(:first-child) { text-align: right; }
-  .sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; }
+  .sw { display: inline-block; width: 15px; height: 9px; margin-right: 6px; vertical-align: -1px; }
+  span.sw { width: 10px; height: 10px; }
   #printArea { display: none; }
   @media print {
     @page { size: A3 landscape; margin: 0; }
@@ -53,6 +54,10 @@
       <p class="hint">The dashed rectangle is what the A3 sheet shows. Tap the map to move it.</p>
       <div class="field" style="margin-top:10px"><span class="label">Scale on A3</span>
         <div class="seg" id="scale"><button data-s="1000" class="on">1:1000</button><button data-s="2000">1:2000</button><button data-s="5000">1:5000</button></div>
+      </div>
+      <div class="field"><span class="label">Graphic style</span>
+        <div class="seg" id="style"><button data-v="atlas">Atlas</button><button data-v="riso">Riso</button><button data-v="ink">Ink</button></div>
+        <p class="hint" id="styleHint"></p>
       </div>
       <div class="field"><label for="title">Sheet title</label><input id="title" type="text" placeholder="e.g. Kadıköy waterfront"></div>
       <button id="run" class="btn primary block">Make the sheets</button>
@@ -139,12 +144,12 @@ function showTab(t) {
 
 // ---------- Classification ----------
 const LU = [
-  ['residential', 'Residential', '#f3d27a'], ['mixed', 'Residential with shops', '#eba45e'], ['commercial', 'Commercial, retail, food', '#d9604c'],
-  ['office', 'Office', '#c27ba0'], ['education', 'Education', '#5b8fd6'], ['health', 'Health', '#86b8e3'], ['religious', 'Religious', '#8e6fc1'],
-  ['civic', 'Public, civic, culture', '#2f5d8a'], ['hotel', 'Hotel, tourism', '#e58ab2'], ['industrial', 'Industrial, storage', '#9b8b7a'],
-  ['transport', 'Transport, parking', '#8a8882'], ['sport', 'Sport', '#6fa36b'], ['unknown', 'Not tagged', '#dcd9d0']
+  ['residential', 'Residential'], ['mixed', 'Residential with shops'], ['commercial', 'Commercial, retail, food'],
+  ['office', 'Office'], ['education', 'Education'], ['health', 'Health'], ['religious', 'Religious'],
+  ['civic', 'Public, civic, culture'], ['hotel', 'Hotel, tourism'], ['industrial', 'Industrial, storage'],
+  ['transport', 'Transport, parking'], ['sport', 'Sport'], ['unknown', 'Not tagged']
 ];
-const LUC = Object.fromEntries(LU.map(([k, , c]) => [k, c])), LUN = Object.fromEntries(LU.map(([k, n]) => [k, n]));
+const LUN = Object.fromEntries(LU.map(([k, n]) => [k, n]));
 const RES = /^(house|residential|apartments|detached|semidetached_house|terrace|dormitory|bungalow|farm|cabin)$/;
 function classify(t) {
   const b = t.building || '', a = t.amenity || '';
@@ -252,116 +257,200 @@ function build(j, o, w, h) {
   return D;
 }
 
-// ---------- Drawing ----------
-const ROADS = {   // [width at 1:1000 in mm, colour] — width scales with the sheet scale, down to a minimum
-  motorway: [2.2, '#8c2d1e'], trunk: [2.0, '#b33b24'], primary: [1.8, '#d9604c'], secondary: [1.5, '#eba45e'], tertiary: [1.2, '#f3d27a'],
-  motorway_link: [1.1, '#8c2d1e'], trunk_link: [1.0, '#b33b24'], primary_link: [1.0, '#d9604c'], secondary_link: [0.9, '#eba45e'], tertiary_link: [0.8, '#f3d27a'],
-  unclassified: [0.9, '#ffffff'], residential: [0.9, '#ffffff'], living_street: [0.8, '#ffffff'], service: [0.5, '#ffffff'],
-  pedestrian: [0.9, '#cfe3bf'], footway: [0.35, '#6fa36b'], path: [0.3, '#6fa36b'], steps: [0.35, '#6fa36b'], cycleway: [0.35, '#2f5d8a'], track: [0.4, '#c9b99a']
+// ---------- Graphic styles ----------
+// A fill is a list of layers [colour, opacity, ink]. Layers with an ink are drawn in that ink's group, and the groups
+// overprint with multiply, like a two- or three-colour risograph. Colours starting with @ are patterns defined per sheet.
+const RISO = { y: '#ffe800', b: '#0078bf', p: '#ff48b0' };
+const STYLES = {
+  atlas: {
+    name: 'Atlas', paper: '#ffffff', ground: '#f4f3ef', street: '#ffffff', ink: '#1b1b19', soft: '#6b6964', faint: '#8a8882', accent: '#c8553d', edge: '#ffffff',
+    f: {
+      residential: [['#ebe5d5']], mixed: [['#e2b48a']], commercial: [['#c8553d']], office: [['#a7786b']], education: [['#5d7c99']], health: [['#a3b8c9']],
+      religious: [['#7d7391']], civic: [['#2f4356']], hotel: [['#dba39b']], industrial: [['#8e8a82']], transport: [['#bdb9b1']], sport: [['#a6b48c']], unknown: [['#ffffff']],
+      bld: [['#d6d3cb']], bldLight: [['#e3e0d9']], heritage: [['#c8553d']],
+      water: [['#d9e4ec']], waterOn: [['#a9c4d6']], greenQuiet: [['#e6ebdf']], park: [['#bfd3a8']], play: [['#d3e2b8']], wood: [['#9db78a']], cemetery: [['#cfd6c4']], beach: [['#efe2bd']], square: [['#f1e4cc']], tree: [['#6f9a5b', 0.9]]
+    },
+    road: { major: '#1b1b19', secondary: '#4a4945', tertiary: '#8a8882', local: '#c9c6be', ped: '#b7cf9f', foot: '#6f9a5b', cycle: '#2f5d8a', rail: '#1b1b19', tram: '#8e6fc1', metro: '#c8553d' },
+    stop: { bus: '#2f4356', dolmus: '#5d7c99', tram: '#7d7391', metro: '#c8553d', rail: '#1b1b19', ferry: '#3c8a99' }, mark: '#1b1b19', markListed: '#c8553d'
+  },
+  riso: {
+    name: 'Riso', paper: '#fbf8f1', ground: '#fbf8f1', street: '#fbf8f1', ink: '#1d3f8f', soft: '#3a5aa8', faint: '#6f86c0', accent: RISO.p, edge: null, inks: ['y', 'b', 'p'],
+    f: {
+      residential: [[RISO.y, 0.4, 'y']], mixed: [[RISO.y, 0.5, 'y'], [RISO.p, 0.35, 'p']], commercial: [[RISO.p, 1, 'p']], office: [[RISO.p, 0.55, 'p']], hotel: [[RISO.p, 0.28, 'p']],
+      education: [[RISO.b, 1, 'b']], health: [[RISO.b, 0.5, 'b']], religious: [[RISO.b, 0.32, 'b'], [RISO.p, 0.32, 'p']], civic: [[RISO.b, 0.9, 'b'], [RISO.p, 0.6, 'p']],
+      industrial: [[RISO.b, 0.28, 'b'], [RISO.y, 0.3, 'y']], transport: [[RISO.b, 0.16, 'b']], sport: [[RISO.y, 0.75, 'y'], [RISO.b, 0.45, 'b']], unknown: [],
+      bld: [[RISO.b, 0.24, 'b']], bldLight: [[RISO.b, 0.14, 'b']], heritage: [[RISO.p, 1, 'p']],
+      water: [[RISO.b, 0.12, 'b']], waterOn: [[RISO.b, 0.42, 'b']], greenQuiet: [[RISO.y, 0.22, 'y']], park: [[RISO.y, 0.7, 'y'], [RISO.b, 0.38, 'b']], play: [[RISO.y, 0.85, 'y'], [RISO.b, 0.2, 'b']],
+      wood: [[RISO.y, 0.7, 'y'], [RISO.b, 0.7, 'b']], cemetery: [[RISO.y, 0.3, 'y'], [RISO.b, 0.3, 'b']], beach: [[RISO.y, 0.55, 'y']], square: [[RISO.p, 0.18, 'p'], [RISO.y, 0.3, 'y']], tree: [[RISO.y, 1, 'y'], [RISO.b, 0.85, 'b']]
+    },
+    road: { major: RISO.p, secondary: RISO.p, tertiary: RISO.b, local: '#9fb7dc', ped: RISO.y, foot: RISO.b, cycle: RISO.p, rail: RISO.b, tram: RISO.p, metro: RISO.p },
+    roadOp: { secondary: 0.55 }, stop: { bus: RISO.b, dolmus: RISO.b, tram: RISO.p, metro: RISO.p, rail: RISO.b, ferry: RISO.b }, mark: RISO.b, markListed: RISO.p
+  },
+  ink: {
+    name: 'Ink', paper: '#ffffff', ground: '#ffffff', street: '#ffffff', ink: '#111111', soft: '#444444', faint: '#777777', accent: '#111111', edge: '#111111',
+    f: {
+      residential: [['#ffffff']], mixed: [['@h45']], commercial: [['#111111']], office: [['@h45d']], hotel: [['@hz']], education: [['@x']], health: [['@dot']],
+      religious: [['@v']], civic: [['#5a5a5a']], industrial: [['#a8a8a8']], transport: [['@dotS']], sport: [['@dotD']], unknown: [['#ffffff']],
+      bld: [['#bdbdbd']], bldLight: [['#d9d9d9']], heritage: [['#111111']],
+      water: [['@hzL']], waterOn: [['@hz']], greenQuiet: [['#ffffff']], park: [['@dot']], play: [['@dotS']], wood: [['@dotD']], cemetery: [['@x']], beach: [['@dotS']], square: [['#ffffff']], tree: [['#111111']]
+    },
+    road: { major: '#111111', secondary: '#111111', tertiary: '#444444', local: '#9a9a9a', ped: '#666666', foot: '#111111', cycle: '#111111', rail: '#111111', tram: '#111111', metro: '#111111' },
+    stop: { bus: '#111111', dolmus: '#111111', tram: '#111111', metro: '#111111', rail: '#111111', ferry: '#111111' }, mark: '#111111', markListed: '#111111', outlined: true
+  }
 };
-const STOPS = { bus: ['#2f5d8a', 'B'], dolmus: ['#5b8fd6', 'D'], tram: ['#8e6fc1', 'T'], metro: ['#c8553d', 'M'], rail: ['#1b1b19', 'R'], ferry: ['#1f7a8c', 'F'] };
+let style = (() => { try { return STYLES[localStorage.getItem('atools.um.style')] ? localStorage.getItem('atools.um.style') : 'atlas'; } catch { return 'atlas'; } })();
+// Hatches and dot screens in mm, for the Ink style.
+function patterns(P, c) {
+  const L = (id, w, h, body) => `<pattern id="${P}${id}" width="${w}" height="${h}" patternUnits="userSpaceOnUse"><rect width="${w}" height="${h}" fill="#fff"/>${body}</pattern>`;
+  return L('h45', 1, 1, `<path d="M-.25 .25L.25-.25M0 1L1 0M.75 1.25L1.25 .75" stroke="${c}" stroke-width=".12"/>`)
+    + L('h45d', 0.5, 0.5, `<path d="M-.125 .125L.125-.125M0 .5L.5 0M.375 .625L.625 .375" stroke="${c}" stroke-width=".1"/>`)
+    + L('x', 0.8, 0.8, `<path d="M0 0L.8 .8M.8 0L0 .8" stroke="${c}" stroke-width=".09"/>`)
+    + L('hz', 0.6, 0.6, `<path d="M0 .3H.6" stroke="${c}" stroke-width=".1"/>`) + L('hzL', 1.2, 1.2, `<path d="M0 .6H1.2" stroke="${c}" stroke-width=".07"/>`)
+    + L('v', 0.6, 0.6, `<path d="M.3 0V.6" stroke="${c}" stroke-width=".1"/>`)
+    + L('dot', 0.8, 0.8, `<circle cx=".2" cy=".2" r=".13" fill="${c}"/><circle cx=".6" cy=".6" r=".13" fill="${c}"/>`)
+    + L('dotS', 1.6, 1.6, `<circle cx=".4" cy=".4" r=".14" fill="${c}"/><circle cx="1.2" cy="1.2" r=".14" fill="${c}"/>`)
+    + L('dotD', 0.5, 0.5, `<circle cx=".125" cy=".125" r=".11" fill="${c}"/><circle cx=".375" cy=".375" r=".11" fill="${c}"/>`);
+}
+// A small stand-alone swatch, for the counts table on screen.
+let swN = 0;
+function swatch(key) {   // drawn in mm like the sheet, so hatches match the print
+  const st = STYLES[style], P = 'sw' + (++swN) + '-', ls = st.f[key] || [];
+  const body = ls.map(([c, op = 1, ink]) => `<rect width="6" height="3.6" fill="${c[0] === '@' ? `url(#${P}${c.slice(1)})` : c}" fill-opacity="${op}"${ink ? ' style="mix-blend-mode:multiply"' : ''}/>`).join('');
+  return `<svg class="sw" width="15" height="9" viewBox="0 0 6 3.6"><defs>${patterns(P, st.ink)}</defs><rect width="6" height="3.6" fill="${st.paper}"/>${body}<rect x=".05" y=".05" width="5.9" height="3.5" fill="none" stroke="#0003" stroke-width=".1"/></svg>`;
+}
+
+// ---------- Drawing ----------
+const ROADW = {   // width at 1:1000 in mm and the style slot — width shrinks gently at smaller scales
+  motorway: [2.2, 'major'], trunk: [2.0, 'major'], primary: [1.8, 'major'], secondary: [1.5, 'secondary'], tertiary: [1.2, 'tertiary'],
+  motorway_link: [1.1, 'major'], trunk_link: [1.0, 'major'], primary_link: [1.0, 'major'], secondary_link: [0.9, 'secondary'], tertiary_link: [0.8, 'tertiary'],
+  unclassified: [0.9, 'local'], residential: [0.9, 'local'], living_street: [0.8, 'local'], service: [0.5, 'local'],
+  pedestrian: [0.9, 'ped'], footway: [0.3, 'foot'], path: [0.28, 'foot'], steps: [0.3, 'foot'], cycleway: [0.3, 'cycle'], track: [0.35, 'local']
+};
+const STOPL = { bus: 'B', dolmus: 'D', tram: 'T', metro: 'M', rail: 'R', ferry: 'F' };
 const STOPN = { bus: 'Bus stop', dolmus: 'Dolmuş stop', tram: 'Tram stop', metro: 'Metro entrance', rail: 'Rail station', ferry: 'Ferry pier' };
+const greenKey = k => /cemetery/.test(k) ? 'cemetery' : /pitch|playground/.test(k) ? 'play' : /wood|forest|scrub/.test(k) ? 'wood' : /beach/.test(k) ? 'beach' : 'park';
 
 let clipN = 0;
 function sheetSvg(kind) {
-  const D = data, k = 1000 / S, X0 = PAGE.mx, Y0 = PAGE.my + 16, cid = 'umclip' + (++clipN);   // unique per render: the screen copy is hidden when printing
+  const D = data, st = STYLES[style], k = 1000 / S, X0 = PAGE.mx, Y0 = PAGE.my + 16, P = 'um' + (++clipN) + '-';   // ids unique per render: the screen copy is hidden when printing
   const X = x => (X0 + PAGE.mapW / 2 + x * k).toFixed(2), Y = y => (Y0 + PAGE.mapH / 2 - y * k).toFixed(2);
   const path = rs => rs.map(r => 'M' + r.map(p => X(p[0]) + ' ' + Y(p[1])).join('L') + 'Z').join('');
   const line = l => 'M' + l.map(p => X(p[0]) + ' ' + Y(p[1])).join('L');
-  const z = S / 1000, rw = (mm) => Math.max(mm / Math.sqrt(z), 0.18);   // road widths shrink gently at smaller scales
-  let m = '';
-  // Base: water and green are on every sheet, quietly.
-  const quiet = kind !== 'open';
-  D.water.forEach(x => m += `<path d="${path(x.r)}" fill="${quiet ? '#dbe7f0' : '#9fc3e0'}" fill-rule="evenodd"/>`);
-  D.green.forEach(x => m += `<path d="${path(x.r)}" fill="${quiet ? '#e7eedd' : greenFill(x.kind)}" fill-rule="evenodd"/>`);
-  if (kind === 'open') D.squares.forEach(x => m += `<path d="${path(x.r)}" fill="#f6e3c4" stroke="#c9a46a" stroke-width="0.2" fill-rule="evenodd"/>`);
+  const z = S / 1000, rw = mm => Math.max(mm / Math.sqrt(z), 0.18);
+  const G = { base: '', y: '', b: '', p: '', top: '' };
+  const fillRef = c => c[0] === '@' ? `url(#${P}${c.slice(1)})` : c;
+  // Paint a shape with a style fill; extra = stroke attributes for the base layer.
+  const paint = (d, key, extra = '') => {
+    const ls = st.f[key] || [];
+    if (!ls.length && extra) G.base += `<path d="${d}" fill="none" ${extra} fill-rule="evenodd"/>`;
+    ls.forEach(([c, op = 1, ink], i) => { const s = `<path d="${d}" fill="${fillRef(c)}"${op < 1 ? ` fill-opacity="${op}"` : ''} fill-rule="evenodd"${i === 0 && !ink ? ' ' + extra : ''}/>`; if (ink) G[ink] += s; else G.base += s; });
+    if (st.inks && extra && ls.length) G.top += `<path d="${d}" fill="none" ${extra} fill-rule="evenodd"/>`;
+  };
+  const stroke = (d, c, w, extra = '', op) => `<path d="${d}" fill="none" stroke="${c}" stroke-width="${w.toFixed(2)}"${op ? ` stroke-opacity="${op}"` : ''} stroke-linecap="round" stroke-linejoin="round"${extra}/>`;
+  const inkOf = c => st.inks ? (Object.keys(RISO).find(i => RISO[i] === c) || null) : null;
+  const put = (s, c) => { const i = inkOf(c); if (i) G[i] += s; else G.base += s; };
+
+  // Ground: water and green on every sheet, quietly except on the open space sheet.
+  const on = kind === 'open';
+  D.water.forEach(x => paint(path(x.r), on ? 'waterOn' : 'water'));
+  D.green.forEach(x => paint(path(x.r), on ? greenKey(x.kind) : 'greenQuiet'));
+  if (on) D.squares.forEach(x => paint(path(x.r), 'square', `stroke="${st.soft}" stroke-width="0.12"`));
   // Streets.
   const order = ['track', 'path', 'footway', 'steps', 'cycleway', 'service', 'living_street', 'residential', 'unclassified', 'pedestrian', 'tertiary_link', 'secondary_link', 'primary_link', 'trunk_link', 'motorway_link', 'tertiary', 'secondary', 'primary', 'trunk', 'motorway'];
-  const rs = D.roads.filter(r => ROADS[r.k]).sort((a, b) => order.indexOf(a.k) - order.indexOf(b.k));
+  const rs = D.roads.filter(r => ROADW[r.k]).sort((a, b) => order.indexOf(a.k) - order.indexOf(b.k));
   if (kind === 'transport') {
-    rs.forEach(r => { const [wd] = ROADS[r.k]; if (ROADS[r.k][1] === '#ffffff' || /pedestrian/.test(r.k)) m += `<path d="${line(r.line)}" fill="none" stroke="#b9b5ab" stroke-width="${(rw(wd) + 0.25).toFixed(2)}" stroke-linecap="round" stroke-linejoin="round"/>`; });
-    rs.forEach(r => { const [wd, col] = ROADS[r.k]; m += `<path d="${line(r.line)}" fill="none" stroke="${col}" stroke-width="${rw(wd).toFixed(2)}" stroke-linecap="round" stroke-linejoin="round"${/footway|path|steps|cycleway/.test(r.k) ? ` stroke-dasharray="${(rw(wd) * 2.5).toFixed(2)} ${(rw(wd) * 1.5).toFixed(2)}"` : ''}/>`; });
-    D.rails.forEach(r => { const c = r.k === 'tram' ? '#8e6fc1' : r.k === 'subway' ? '#c8553d' : '#1b1b19';
-      m += `<path d="${line(r.line)}" fill="none" stroke="${c}" stroke-width="0.6"${r.k === 'subway' ? ' stroke-dasharray="1.2 0.8"' : ''}/>` + (r.k === 'rail' ? `<path d="${line(r.line)}" fill="none" stroke="#fff" stroke-width="0.3" stroke-dasharray="1 1"/>` : ''); });
-  } else {
-    rs.forEach(r => m += `<path d="${line(r.line)}" fill="none" stroke="#ece9e2" stroke-width="${(rw(ROADS[r.k][0]) * 0.9).toFixed(2)}" stroke-linecap="round" stroke-linejoin="round"/>`);
+    rs.forEach(r => { const [wd, slot] = ROADW[r.k], c = st.road[slot], w = rw(wd), foot = /foot|cycle/.test(slot);
+      put(stroke(line(r.line), c, w, foot ? ` stroke-dasharray="${(w * 2.5).toFixed(2)} ${(w * 1.6).toFixed(2)}"` : '', st.roadOp && st.roadOp[slot]), c); });
+    D.rails.forEach(r => { const c = r.k === 'tram' ? st.road.tram : r.k === 'subway' ? st.road.metro : st.road.rail;
+      put(stroke(line(r.line), c, 0.6, r.k === 'subway' ? ' stroke-dasharray="1.2 0.8"' : ''), c);
+      if (r.k === 'rail') put(stroke(line(r.line), st.paper, 0.3, ' stroke-dasharray="1 1" stroke-linecap="butt"'), null); });
+  } else if (st.street !== st.ground) {
+    rs.forEach(r => G.base += stroke(line(r.line), st.street, rw(ROADW[r.k][0]) * 0.9));
+  } else if (!st.inks) {
+    rs.forEach(r => G.base += stroke(line(r.line), '#ececec', rw(ROADW[r.k][0]) * 0.9));
   }
   // Buildings.
+  const edge = st.outlined ? `stroke="${st.ink}" stroke-width="0.1"` : st.edge ? `stroke="${st.edge}" stroke-width="0.12"` : '';
   D.buildings.forEach(b => {
-    const fill = kind === 'landuse' ? LUC[b.cls] : kind === 'landmarks' ? (b.t.heritage || b.t.historic ? '#c8553d' : '#cfccc3') : kind === 'transport' ? '#dcd9d0' : '#bdb9b0';
-    m += `<path d="${path(b.r)}" fill="${fill}" stroke="${kind === 'landuse' ? '#6b6964' : 'none'}" stroke-width="0.08" fill-rule="evenodd"/>`;
+    const key = kind === 'landuse' ? b.cls : kind === 'landmarks' ? (b.t.heritage || b.t.historic ? 'heritage' : 'bldLight') : kind === 'transport' ? 'bldLight' : 'bld';
+    const ex = key === 'unknown' ? `stroke="${st.faint}" stroke-width="0.12"${st.outlined ? ' stroke-dasharray=".5 .4"' : ''}` : kind === 'landuse' || st.outlined ? edge : '';
+    paint(path(b.r), key, ex);
   });
-  if (kind === 'open') D.trees.forEach(p => m += `<circle cx="${X(p[0])}" cy="${Y(p[1])}" r="${Math.max(0.35, 3 * k).toFixed(2)}" fill="#5f8f4e" opacity=".85"/>`);
-  if (kind === 'transport') D.stopsU.forEach(s => { const [c, l] = STOPS[s.kind]; m += `<circle cx="${X(s.p[0])}" cy="${Y(s.p[1])}" r="1.5" fill="${c}" stroke="#fff" stroke-width="0.3"/><text x="${X(s.p[0])}" y="${(+Y(s.p[1]) + 0.75).toFixed(2)}" font-size="2" font-weight="700" fill="#fff" text-anchor="middle">${l}</text>`; });
-  if (kind === 'landmarks') D.marks.forEach((mk, i) => m += `<circle cx="${X(mk.p[0])}" cy="${Y(mk.p[1])}" r="2.2" fill="${mk.listed ? '#c8553d' : '#1b1b19'}" stroke="#fff" stroke-width="0.4"/><text x="${X(mk.p[0])}" y="${(+Y(mk.p[1]) + 0.9).toFixed(2)}" font-size="2.4" font-weight="700" fill="#fff" text-anchor="middle">${i + 1}</text>`);
+  let top = '';
+  if (on) D.trees.forEach(p => { const r = Math.max(0.4, 3 * k).toFixed(2); st.f.tree.forEach(([c, op = 1, ink]) => { const s = `<circle cx="${X(p[0])}" cy="${Y(p[1])}" r="${r}" fill="${c}" fill-opacity="${op}"/>`; if (ink) G[ink] += s; else G.base += s; }); });
+  if (kind === 'transport') D.stopsU.forEach(s => top += `<circle cx="${X(s.p[0])}" cy="${Y(s.p[1])}" r="1.5" fill="${st.stop[s.kind]}" stroke="${st.paper}" stroke-width="0.3"/><text x="${X(s.p[0])}" y="${(+Y(s.p[1]) + 0.75).toFixed(2)}" font-size="2" font-weight="700" fill="#fff" text-anchor="middle">${STOPL[s.kind]}</text>`);
+  if (kind === 'landmarks') D.marks.forEach((mk, i) => top += `<circle cx="${X(mk.p[0])}" cy="${Y(mk.p[1])}" r="2.2" fill="${mk.listed ? st.markListed : st.mark}" stroke="${st.paper}" stroke-width="0.4"/><text x="${X(mk.p[0])}" y="${(+Y(mk.p[1]) + 0.9).toFixed(2)}" font-size="2.4" font-weight="700" fill="#fff" text-anchor="middle">${i + 1}</text>`);
+  // Risograph: each ink is its own layer, overprinted with multiply and a slight misregistration.
+  const reg = { y: [0, 0], b: [0, 0], p: [0.22, -0.15] };
+  const m = G.base + (st.inks || []).map(i => G[i] ? `<g style="mix-blend-mode:multiply" transform="translate(${reg[i][0]} ${reg[i][1]})">${G[i]}</g>` : '').join('') + G.top + top;
 
   // Page.
   const titles = { landuse: 'Land use', transport: 'Transport and access', open: 'Open space network', landmarks: 'Landmarks and heritage' };
   const nos = { landuse: '01', transport: '02', open: '03', landmarks: '04' };
-  let o = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${PAGE.w} ${PAGE.h}" font-family="Inter, sans-serif" fill="#1b1b19">`;
-  o += `<rect width="${PAGE.w}" height="${PAGE.h}" fill="#fff"/><defs><clipPath id="${cid}"><rect x="${X0}" y="${Y0}" width="${PAGE.mapW}" height="${PAGE.mapH}"/></clipPath></defs>`;
-  o += `<text x="${X0}" y="${PAGE.my + 4}" font-size="3" font-weight="600" fill="#c8553d" letter-spacing=".4">${nos[kind]} · URBAN ANALYSIS</text>`;
-  o += `<text x="${X0}" y="${PAGE.my + 11.5}" font-size="7" font-weight="700">${esc(titles[kind])}</text>`;
-  o += `<text x="${X0 + PAGE.mapW}" y="${PAGE.my + 11.5}" font-size="3.2" text-anchor="end" fill="#4a4945">${esc($('title').value.trim() || D.o.name || '')} · ${D.o.lat.toFixed(4)}° N, ${D.o.lng.toFixed(4)}° E</text>`;
-  o += `<g clip-path="url(#${cid})"><rect x="${X0}" y="${Y0}" width="${PAGE.mapW}" height="${PAGE.mapH}" fill="#faf9f6"/>${m}</g>`;
-  o += `<rect x="${X0}" y="${Y0}" width="${PAGE.mapW}" height="${PAGE.mapH}" fill="none" stroke="#1b1b19" stroke-width="0.35"/>`;
-  // Scale bar and north arrow.
+  let o = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${PAGE.w} ${PAGE.h}" font-family="Inter, Helvetica, Arial, sans-serif" fill="${st.ink}">`;
+  o += `<rect width="${PAGE.w}" height="${PAGE.h}" fill="${st.paper}"/><defs><clipPath id="${P}clip"><rect x="${X0}" y="${Y0}" width="${PAGE.mapW}" height="${PAGE.mapH}"/></clipPath>${patterns(P, st.ink)}</defs>`;
+  o += `<text x="${X0}" y="${PAGE.my + 4}" font-size="2.6" font-weight="600" fill="${st.accent}" letter-spacing=".5">${nos[kind]} — URBAN ANALYSIS</text>`;
+  o += `<text x="${X0}" y="${PAGE.my + 11.5}" font-size="7" font-weight="600" letter-spacing="-.1">${esc(titles[kind])}</text>`;
+  o += `<text x="${X0 + PAGE.mapW}" y="${PAGE.my + 11.5}" font-size="3" text-anchor="end" fill="${st.soft}">${esc($('title').value.trim() || D.o.name || '')}  ·  ${D.o.lat.toFixed(4)}° N  ${D.o.lng.toFixed(4)}° E</text>`;
+  o += `<g clip-path="url(#${P}clip)"><rect x="${X0}" y="${Y0}" width="${PAGE.mapW}" height="${PAGE.mapH}" fill="${st.ground}"/>${m}</g>`;
+  o += `<rect x="${X0}" y="${Y0}" width="${PAGE.mapW}" height="${PAGE.mapH}" fill="none" stroke="${st.ink}" stroke-width="0.25"/>`;
+  // Scale bar and north arrow, light.
   const bar = S <= 1000 ? 50 : S <= 2000 ? 100 : 250, bl = bar * k, bx = X0 + 6, by = Y0 + PAGE.mapH - 7;
-  o += `<rect x="${bx - 2}" y="${by - 5}" width="${bl + 22}" height="9" fill="#fff" opacity=".85"/>`;
-  o += `<rect x="${bx}" y="${by}" width="${bl / 2}" height="1.4" fill="#1b1b19"/><rect x="${bx + bl / 2}" y="${by}" width="${bl / 2}" height="1.4" fill="#fff" stroke="#1b1b19" stroke-width="0.2"/>`;
-  o += `<text x="${bx}" y="${by - 1.2}" font-size="2.4">0</text><text x="${bx + bl}" y="${by - 1.2}" font-size="2.4" text-anchor="middle">${bar} m</text><text x="${bx + bl + 4}" y="${by + 1.4}" font-size="2.6" font-weight="600">1:${S}</text>`;
-  o += `<g transform="translate(${X0 + PAGE.mapW - 10} ${Y0 + 12})"><circle r="6" fill="#fff" stroke="#e3e0d8" stroke-width="0.3"/><path d="M0 -4.5 L2.4 3 L0 1.6 L-2.4 3Z" fill="#1b1b19"/><text y="-7.5" font-size="3" font-weight="700" text-anchor="middle">N</text></g>`;
-  // Legend column.
-  o += legend(kind, PAGE.colX, Y0);
-  o += `<text x="${X0}" y="${PAGE.h - 6}" font-size="2.4" fill="#8a8882">Data © OpenStreetMap contributors (ODbL), downloaded ${new Date().toISOString().slice(0, 10)}. Unmapped features are missing: check on site. Road class is a proxy for traffic, not a count. Made with a_tools.</text>`;
+  o += `<rect x="${bx - 2}" y="${by - 5}" width="${bl + 22}" height="9" fill="${st.paper}" opacity=".9"/>`;
+  o += `<path d="M${bx} ${by + 1}H${bx + bl}M${bx} ${by - 0.4}V${by + 1}M${bx + bl / 2} ${by}V${by + 1}M${bx + bl} ${by - 0.4}V${by + 1}" stroke="${st.ink}" stroke-width="0.25" fill="none"/>`;
+  o += `<text x="${bx}" y="${by - 1.4}" font-size="2.3">0</text><text x="${bx + bl}" y="${by - 1.4}" font-size="2.3" text-anchor="middle">${bar} m</text><text x="${bx + bl + 4}" y="${by + 1.2}" font-size="2.5" font-weight="600">1:${S}</text>`;
+  o += `<g transform="translate(${X0 + PAGE.mapW - 8} ${Y0 + 10})"><path d="M0 -5V5" stroke="${st.ink}" stroke-width="0.25"/><path d="M0 -5L1.6 -1.2H-1.6Z" fill="${st.ink}"/><text y="-6.5" font-size="2.6" font-weight="600" text-anchor="middle">N</text></g>`;
+  o += legend(kind, PAGE.colX, Y0, P);
+  o += `<text x="${X0}" y="${PAGE.h - 6}" font-size="2.2" fill="${st.faint}">Data © OpenStreetMap contributors (ODbL), downloaded ${new Date().toISOString().slice(0, 10)}. Unmapped features are missing: check on site. Road class is a proxy for traffic, not a count. Made with a_tools.</text>`;
   return o + '</svg>';
 }
-function greenFill(k) { return /cemetery/.test(k) ? '#c9d6bf' : /pitch|playground/.test(k) ? '#bfdcae' : /wood|forest|scrub/.test(k) ? '#9cc08a' : /beach/.test(k) ? '#f2e3b8' : '#b7d6a0'; }
 
-function legend(kind, x, y) {
-  const D = data; let o = '', yy = y + 2;
-  const head = t => { o += `<text x="${x}" y="${yy + 3}" font-size="3.2" font-weight="700">${t}</text>`; yy += 7; };
-  const row = (sw, label, val) => { o += sw + `<text x="${x + 7}" y="${yy + 2.6}" font-size="2.8">${esc(label)}</text>` + (val != null ? `<text x="${x + 86}" y="${yy + 2.6}" font-size="2.8" text-anchor="end" fill="#4a4945">${val}</text>` : ''); yy += 5; };
-  const box = c => `<rect x="${x}" y="${yy}" width="5" height="3.4" rx="0.5" fill="${c}" stroke="#6b6964" stroke-width="0.1"/>`;
-  const ln = (c, w, dash) => `<line x1="${x}" y1="${yy + 1.7}" x2="${x + 5}" y2="${yy + 1.7}" stroke="${c}" stroke-width="${w}"${dash ? ' stroke-dasharray="1 .6"' : ''}/>`;
-  const dot = (c, l) => `<circle cx="${x + 2.5}" cy="${yy + 1.7}" r="1.6" fill="${c}"/><text x="${x + 2.5}" y="${yy + 2.5}" font-size="2" font-weight="700" fill="#fff" text-anchor="middle">${l}</text>`;
+function legend(kind, x, y, P) {
+  const D = data, st = STYLES[style]; let o = '', yy = y + 2;
+  const head = t => { o += `<text x="${x}" y="${yy + 3}" font-size="2.6" font-weight="600" letter-spacing=".35" fill="${st.accent === '#111111' ? st.ink : st.accent}">${t.toUpperCase()}</text>`; yy += 7; };
+  const row = (sw, label, val) => { o += sw + `<text x="${x + 8}" y="${yy + 2.6}" font-size="2.8">${esc(label)}</text>` + (val != null ? `<text x="${x + 86}" y="${yy + 2.6}" font-size="2.8" text-anchor="end" fill="${st.soft}">${val}</text>` : ''); yy += 5; };
+  const fillRef = c => c[0] === '@' ? `url(#${P}${c.slice(1)})` : c;
+  const box = key => { const ls = st.f[key] || []; return ls.map(([c, op = 1, ink]) => `<rect x="${x}" y="${yy}" width="6" height="3.6" fill="${fillRef(c)}" fill-opacity="${op}"${ink ? ' style="mix-blend-mode:multiply"' : ''}/>`).join('') + `<rect x="${x}" y="${yy}" width="6" height="3.6" fill="none" stroke="${key === 'unknown' || st.outlined ? st.faint : 'none'}" stroke-width="0.12"/>`; };
+  const ln = (slot, w, dash) => `<line x1="${x}" y1="${yy + 1.8}" x2="${x + 6}" y2="${yy + 1.8}" stroke="${st.road[slot]}" stroke-width="${w}"${st.roadOp && st.roadOp[slot] ? ` stroke-opacity="${st.roadOp[slot]}"` : ''}${dash ? ' stroke-dasharray="1 .6"' : ''}/>`;
+  const dot = (c, l) => `<circle cx="${x + 3}" cy="${yy + 1.8}" r="1.6" fill="${c}"/><text x="${x + 3}" y="${yy + 2.6}" font-size="2" font-weight="700" fill="#fff" text-anchor="middle">${l}</text>`;
+  const sub = t => { o += `<text x="${x + 86}" y="${yy - 3}" font-size="2.2" text-anchor="end" fill="${st.faint}">${t}</text>`; };
   if (kind === 'landuse') {
-    const st = landuseStats(); head('Building use'); o += `<text x="${x + 86}" y="${yy - 3}" font-size="2.4" text-anchor="end" fill="#8a8882">buildings · footprint</text>`;
-    st.rows.forEach(r => row(box(LUC[r.k]), LUN[r.k], `${fmt(r.n)} · ${Math.round(100 * r.a / st.area)}%`));
+    const lu = landuseStats(); head('Building use'); sub('buildings · footprint');
+    lu.rows.forEach(r => row(box(r.k), LUN[r.k], `${fmt(r.n)} · ${Math.round(100 * r.a / lu.area)}%`));
     yy += 3; head('Reading the map');
-    const top = st.rows.filter(r => r.k !== 'unknown')[0], unk = st.rows.find(r => r.k === 'unknown');
-    o += para(x, yy, [`${fmt(D.buildings.length)} buildings, ${fmt(st.area / 1e4, 1)} ha of footprint.`, top ? `Largest use: ${LUN[top.k].toLowerCase()} (${Math.round(100 * top.a / st.area)}% of footprint).` : '',
-      `${fmt(D.pois.filter(p => POI_COM(p.t)).length)} shops, cafés, offices and services mapped as points.`, unk ? `${Math.round(100 * unk.a / st.area)}% of footprint has no use in OSM: survey these.` : '']);
+    const topU = lu.rows.filter(r => r.k !== 'unknown')[0], unk = lu.rows.find(r => r.k === 'unknown');
+    o += para(x, yy, [`${fmt(D.buildings.length)} buildings, ${fmt(lu.area / 1e4, 1)} ha of footprint.`, topU ? `Largest use: ${LUN[topU.k].toLowerCase()} (${Math.round(100 * topU.a / lu.area)}% of footprint).` : '',
+      `${fmt(D.pois.filter(p => POI_COM(p.t)).length)} shops, cafés, offices and services mapped as points.`, unk ? `${Math.round(100 * unk.a / lu.area)}% of footprint has no use in OSM: survey these.` : ''], st);
   } else if (kind === 'transport') {
-    head('Street hierarchy'); o += `<text x="${x + 86}" y="${yy - 3}" font-size="2.4" text-anchor="end" fill="#8a8882">km in frame</text>`;
+    head('Street hierarchy'); sub('km in frame');
     const km = roadKm();
-    [['Motorway, trunk', '#b33b24', 1.6, /^(motorway|trunk)/], ['Primary', '#d9604c', 1.4, /^primary/], ['Secondary', '#eba45e', 1.2, /^secondary/], ['Tertiary', '#f3d27a', 1, /^tertiary/],
-     ['Local streets', '#b9b5ab', 0.9, /^(residential|unclassified|living_street|service)$/], ['Pedestrian streets', '#cfe3bf', 1, /^pedestrian$/], ['Footpaths, steps', '#6fa36b', 0.4, /^(footway|path|steps)$/], ['Cycleways', '#2f5d8a', 0.4, /^cycleway$/]]
-      .forEach(([n, c, w, re]) => row(ln(c, w, /Foot|Cycle/.test(n)), n, fmt(Object.entries(km).filter(([kk]) => re.test(kk)).reduce((a, [, v]) => a + v, 0), 1)));
-    if (D.rails.length) row(ln('#1b1b19', 0.6), 'Rail, tram, metro lines');
-    yy += 3; head('Public transport'); o += `<text x="${x + 86}" y="${yy - 3}" font-size="2.4" text-anchor="end" fill="#8a8882">in frame</text>`;
-    Object.keys(STOPS).forEach(kk => { const n = D.stopsU.filter(s => s.kind === kk).length; if (n) row(dot(...STOPS[kk]), STOPN[kk], n); });
-    if (!D.stopsU.length) o += para(x, yy, ['No stops are mapped in this frame.']), yy = para.y;
+    [['Motorway, trunk, primary', 'major', 1.6, /^(motorway|trunk|primary)/], ['Secondary', 'secondary', 1.3, /^secondary/], ['Tertiary', 'tertiary', 1.1, /^tertiary/],
+     ['Local streets', 'local', 0.9, /^(residential|unclassified|living_street|service|track)$/], ['Pedestrian streets', 'ped', 1, /^pedestrian$/], ['Footpaths, steps', 'foot', 0.35, /^(footway|path|steps)$/], ['Cycleways', 'cycle', 0.35, /^cycleway$/]]
+      .forEach(([n, slot, w, re]) => row(ln(slot, w, /foot|cycle/.test(slot)), n, fmt(Object.entries(km).filter(([kk]) => re.test(kk)).reduce((a, [, v]) => a + v, 0), 1)));
+    if (D.rails.length) row(ln('rail', 0.6), 'Rail, tram, metro lines');
+    yy += 3; head('Public transport'); sub('in frame');
+    Object.keys(STOPL).forEach(kk => { const n = D.stopsU.filter(s => s.kind === kk).length; if (n) row(dot(st.stop[kk], STOPL[kk]), STOPN[kk], n); });
+    if (!D.stopsU.length) o += para(x, yy, ['No stops are mapped in this frame.'], st), yy = para.y;
     yy += 3; head('Reading the map');
-    o += para(x, yy, ['Line weight follows the OSM road class, the usual proxy for traffic.', 'Count vehicles and people on site at peak hours to confirm.']);
+    o += para(x, yy, ['Line weight follows the OSM road class, the usual proxy for traffic.', 'Count vehicles and people on site at peak hours to confirm.'], st);
   } else if (kind === 'open') {
-    const st = openStats(); head('Open space'); o += `<text x="${x + 86}" y="${yy - 3}" font-size="2.4" text-anchor="end" fill="#8a8882">ha · % of frame</text>`;
-    st.forEach(r => row(box(r.c), r.n, `${fmt(r.a / 1e4, 2)} · ${fmt(100 * r.a / (D.w * D.h), 1)}%`));
-    row(`<circle cx="${x + 2.5}" cy="${yy + 1.7}" r="1.2" fill="#5f8f4e"/>`, 'Trees mapped', fmt(D.trees.length));
+    const os = openStats(); head('Open space'); sub('ha · % of frame');
+    os.forEach(r => row(box(r.key), r.n, `${fmt(r.a / 1e4, 2)} · ${fmt(100 * r.a / (D.w * D.h), 1)}%`));
+    row(st.f.tree.map(([c, op = 1]) => `<circle cx="${x + 3}" cy="${yy + 1.8}" r="1.3" fill="${c}" fill-opacity="${op}" style="mix-blend-mode:multiply"/>`).join(''), 'Trees mapped', fmt(D.trees.length));
     yy += 3; head('Reading the map');
     const bArea = D.buildings.reduce((a, b) => a + b.area, 0);
-    o += para(x, yy, [`Built footprint covers ${fmt(100 * bArea / (D.w * D.h), 0)}% of the frame.`, `Green and squares cover ${fmt(100 * st.reduce((a, r) => a + (/Water/.test(r.n) ? 0 : r.a), 0) / (D.w * D.h), 1)}%.`, 'Trees are only those mapped in OSM.']);
+    o += para(x, yy, [`Built footprint covers ${fmt(100 * bArea / (D.w * D.h), 0)}% of the frame.`, `Green and squares cover ${fmt(100 * os.reduce((a, r) => a + (r.key === 'waterOn' ? 0 : r.a), 0) / (D.w * D.h), 1)}%.`, 'Trees are only those mapped in OSM.'], st);
   } else {
     head('Landmarks'); yy -= 1;
-    D.marks.slice(0, 30).forEach((mk, i) => { row(`<circle cx="${x + 2.5}" cy="${yy + 1.7}" r="1.7" fill="${mk.listed ? '#c8553d' : '#1b1b19'}"/><text x="${x + 2.5}" y="${yy + 2.5}" font-size="2" font-weight="700" fill="#fff" text-anchor="middle">${i + 1}</text>`, (mk.name.length > 34 ? mk.name.slice(0, 33) + '…' : mk.name)); o += `<text x="${x + 7}" y="${yy + 0.8}" font-size="2.1" fill="#8a8882">${esc(mk.kind)}</text>`; yy += 2; });
-    if (!D.marks.length) o += para(x, yy, ['No named historic places, monuments or attractions are mapped here.']), yy = para.y;
-    yy += 3; row(box('#c8553d'), 'Historic or listed building'); row(`<circle cx="${x + 2.5}" cy="${yy + 1.7}" r="1.6" fill="#c8553d"/>`, 'Listed (heritage tag)');
+    D.marks.slice(0, 30).forEach((mk, i) => { row(`<circle cx="${x + 3}" cy="${yy + 1.8}" r="1.7" fill="${mk.listed ? st.markListed : st.mark}"/><text x="${x + 3}" y="${yy + 2.6}" font-size="2" font-weight="700" fill="#fff" text-anchor="middle">${i + 1}</text>`, (mk.name.length > 34 ? mk.name.slice(0, 33) + '…' : mk.name)); o += `<text x="${x + 8}" y="${yy + 0.8}" font-size="2.1" fill="${st.faint}">${esc(mk.kind)}</text>`; yy += 2; });
+    if (!D.marks.length) o += para(x, yy, ['No named historic places, monuments or attractions are mapped here.'], st), yy = para.y;
+    yy += 3; row(box('heritage'), 'Historic or listed building'); row(`<circle cx="${x + 3}" cy="${yy + 1.8}" r="1.6" fill="${st.markListed}"/>`, 'Listed (heritage tag)');
   }
   return o;
 }
-function para(x, y, lines) {
+function para(x, y, lines, st = STYLES[style]) {
   let o = '', yy = y;
-  lines.filter(Boolean).forEach(t => { const words = t.split(' '); let cur = ''; words.forEach(w => { if ((cur + ' ' + w).length > 52) { o += `<text x="${x}" y="${yy + 2.6}" font-size="2.6" fill="#4a4945">${esc(cur.trim())}</text>`; yy += 3.6; cur = w; } else cur += ' ' + w; }); o += `<text x="${x}" y="${yy + 2.6}" font-size="2.6" fill="#4a4945">${esc(cur.trim())}</text>`; yy += 5; });
+  lines.filter(Boolean).forEach(t => { const words = t.split(' '); let cur = ''; words.forEach(w => { if ((cur + ' ' + w).length > 52) { o += `<text x="${x}" y="${yy + 2.6}" font-size="2.6" fill="${st.soft}">${esc(cur.trim())}</text>`; yy += 3.6; cur = w; } else cur += ' ' + w; }); o += `<text x="${x}" y="${yy + 2.6}" font-size="2.6" fill="${st.soft}">${esc(cur.trim())}</text>`; yy += 5; });
   para.y = yy; return o;
 }
 
@@ -389,20 +478,20 @@ function clippedArea(rs) {   // area of polygon rings inside the frame, by sampl
   return n * st * st;
 }
 function openStats() {
-  const groups = [['Parks and gardens', '#b7d6a0', /park|garden|village_green|common|recreation_ground|grass|meadow|grassland/], ['Playgrounds and pitches', '#bfdcae', /playground|pitch/],
-    ['Woods and scrub', '#9cc08a', /wood|forest|scrub/], ['Cemeteries', '#c9d6bf', /cemetery/], ['Beaches', '#f2e3b8', /beach/]];
-  const out = groups.map(([n, c, re]) => ({ n, c, a: data.green.filter(g => re.test(g.kind || '')).reduce((a, g) => a + clippedArea(g.r), 0) })).filter(r => r.a > 0);
-  const sq = data.squares.reduce((a, g) => a + clippedArea(g.r), 0); if (sq) out.push({ n: 'Squares, pedestrian areas', c: '#f6e3c4', a: sq });
-  const wa = data.water.reduce((a, g) => a + clippedArea(g.r), 0); if (wa) out.push({ n: 'Water', c: '#9fc3e0', a: wa });
+  const groups = [['Parks and gardens', 'park', /park|garden|village_green|common|recreation_ground|grass|meadow|grassland/], ['Playgrounds and pitches', 'play', /playground|pitch/],
+    ['Woods and scrub', 'wood', /wood|forest|scrub/], ['Cemeteries', 'cemetery', /cemetery/], ['Beaches', 'beach', /beach/]];
+  const out = groups.map(([n, key, re]) => ({ n, key, a: data.green.filter(g => re.test(g.kind || '')).reduce((a, g) => a + clippedArea(g.r), 0) })).filter(r => r.a > 0);
+  const sq = data.squares.reduce((a, g) => a + clippedArea(g.r), 0); if (sq) out.push({ n: 'Squares, pedestrian areas', key: 'square', a: sq });
+  const wa = data.water.reduce((a, g) => a + clippedArea(g.r), 0); if (wa) out.push({ n: 'Water', key: 'waterOn', a: wa });
   return out;
 }
 
 function counts(kind) {
   let rows = [];
-  if (kind === 'landuse') { const st = landuseStats(); rows = st.rows.map(r => [`<span class="sw" style="background:${LUC[r.k]}"></span>${LUN[r.k]}`, fmt(r.n), Math.round(100 * r.a / st.area) + '%']); }
-  if (kind === 'transport') { const km = roadKm(); rows = Object.keys(STOPS).map(k => [`<span class="sw" style="background:${STOPS[k][0]}"></span>${STOPN[k]}`, data.stopsU.filter(s => s.kind === k).length, '']).filter(r => r[1])
+  if (kind === 'landuse') { const st = landuseStats(); rows = st.rows.map(r => [`${swatch(r.k)}${LUN[r.k]}`, fmt(r.n), Math.round(100 * r.a / st.area) + '%']); }
+  if (kind === 'transport') { const km = roadKm(); rows = Object.keys(STOPL).map(k => [`<span class="sw" style="background:${STYLES[style].stop[k]};border-radius:50%"></span>${STOPN[k]}`, data.stopsU.filter(s => s.kind === k).length, '']).filter(r => r[1])
     .concat(Object.entries(km).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([k, v]) => [k.replace(/_/g, ' '), fmt(v, 2) + ' km', ''])); }
-  if (kind === 'open') rows = openStats().map(r => [`<span class="sw" style="background:${r.c}"></span>${r.n}`, fmt(r.a / 1e4, 2) + ' ha', fmt(100 * r.a / (data.w * data.h), 1) + '%']).concat([['Trees mapped', fmt(data.trees.length), '']]);
+  if (kind === 'open') rows = openStats().map(r => [`${swatch(r.key)}${r.n}`, fmt(r.a / 1e4, 2) + ' ha', fmt(100 * r.a / (data.w * data.h), 1) + '%']).concat([['Trees mapped', fmt(data.trees.length), '']]);
   if (kind === 'landmarks') rows = data.marks.map((m, i) => [`${i + 1}. ${esc(m.name)}`, esc(m.kind), m.wd ? `<a href="https://www.wikidata.org/wiki/${esc(m.wd)}" target="_blank" rel="noopener">wiki</a>` : '']);
   $('cntTitle').textContent = { landuse: 'Land use', transport: 'Transport', open: 'Open space', landmarks: 'Landmarks' }[kind];
   $('cnt').innerHTML = rows.map(r => `<tr>${r.map(c => `<td>${c}</td>`).join('')}</tr>`).join('') || '<tr><td>Nothing mapped here.</td></tr>';
@@ -411,12 +500,20 @@ function counts(kind) {
 
 // ---------- Exports ----------
 $('run').onclick = run;
-const base = () => `urban-${ATools.slug($('title').value.trim() || data.o.name)}-1-${S}`;
+const STYLE_HINT = { atlas: 'Muted flat colour on a pale ground, white party walls, one red accent.', riso: 'Three overprinted inks (yellow, blue, pink) like a risograph print. Mixed uses show as mixed inks.', ink: 'Black and white hatches and dot screens: photocopies cleanly and works next to pen drawings.' };
+function setStyle(v) {
+  style = v; try { localStorage.setItem('atools.um.style', v); } catch {}
+  document.querySelectorAll('#style button').forEach(b => b.classList.toggle('on', b.dataset.v === v)); $('styleHint').textContent = STYLE_HINT[v];
+  if (data && tab !== 'map') showTab(tab);
+}
+document.querySelectorAll('#style button').forEach(b => b.onclick = () => setStyle(b.dataset.v));
+setStyle(style);
+const base = () => `urban-${ATools.slug($('title').value.trim() || data.o.name)}-1-${S}-${style}`;
 $('svg').onclick = () => ATools.download(`${base()}-${tab}.svg`, sheetSvg(tab), 'image/svg+xml');
 $('csv').onclick = () => {
   const lu = landuseStats(), km = roadKm(), out = [['sheet', 'item', 'count', 'area_m2_or_km', 'share_pct']];
   lu.rows.forEach(r => out.push(['land use', LUN[r.k], r.n, Math.round(r.a), (100 * r.a / lu.area).toFixed(1)]));
-  Object.keys(STOPS).forEach(k => out.push(['transport', STOPN[k], data.stopsU.filter(s => s.kind === k).length, '', '']));
+  Object.keys(STOPL).forEach(k => out.push(['transport', STOPN[k], data.stopsU.filter(s => s.kind === k).length, '', '']));
   Object.entries(km).forEach(([k, v]) => out.push(['transport', 'street km: ' + k, '', v.toFixed(3), '']));
   openStats().forEach(r => out.push(['open space', r.n, '', Math.round(r.a), (100 * r.a / (data.w * data.h)).toFixed(2)]));
   out.push(['open space', 'trees mapped', data.trees.length, '', '']);
