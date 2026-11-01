@@ -268,12 +268,16 @@ async function run() {
 
   // Ground under the buildings behind: one extra elevation call for their centres.
   if (zs && ter.status === 'fulfilled' && beyond.length) {
+    // The elevation model includes roofs, so take the lowest of the centre and two points 45 m either side along the line.
     const near = beyond.slice().sort((a, b) => a.s - b.s).slice(0, 100);
-    try { const e = await elevations(near.map(x => m2ll(x.c, o))); near.forEach((x, i) => x.z = e[i]); } catch (e) {}
+    const pts = near.flatMap(x => [x.c, [x.c[0] - 45 * u[0], x.c[1] - 45 * u[1]], [x.c[0] + 45 * u[0], x.c[1] + 45 * u[1]]]);
+    try { const e = await elevations(pts.map(p => m2ll(p, o))); near.forEach((x, i) => x.z = Math.min(e[3 * i], e[3 * i + 1], e[3 * i + 2])); } catch (e) {}
   }
   beyond.forEach(x => { if (x.z == null || x.cutToo) x.z = Math.min(zAt(x.t0), zAt(x.t1), zAt((x.t0 + x.t1) / 2)); });
   beyond = beyond.filter(x => !x.cutToo || x.s < depth).sort((a, b) => b.s - a.s);   // far first
 
+  if (osm.status === 'fulfilled' && !cut.length && beyond.length < 3 && L0 > 150)
+    notes.push('OpenStreetMap has few or no buildings mapped along this line, so the section may be missing buildings. Check on an aerial photo.');
   // Street H/W: the main road crossed and the first buildings either side of it.
   let hw = null;
   // Only streets the line crosses at more than 45°: a line along a street would measure its length, not its width.
@@ -313,27 +317,37 @@ function sectionSvg(r, { W = 1100, forPrint = null } = {}) {
   const terr = r.zs.map((z, i) => [X(r.L0 * i / (r.zs.length - 1)), Y(z)]);
   const gpath = `M${terr.map(p => p.map(v => v.toFixed(2)).join(' ')).join(' L')} L${X(r.L0)} ${Y(base)} L${X(0)} ${Y(base)}Z`;
   o += `<path d="${gpath}" fill="#fff"/><path d="${gpath}" fill="url(#hatch)"/>`;
-  // Cut buildings (labels after all of them, so none is hidden).
+  // Cut buildings (labels after all of them, so none is hidden). Labels claim boxes; one that would overlap another moves up a row or is left out.
   let labels = '';
+  const boxes = [], tw = (s, k) => String(s).length * fs * k * .56;
+  const claim = (x0, x1, y0, y1) => { if (boxes.some(b => x0 < b[1] && x1 > b[0] && y0 < b[3] && y1 > b[2])) return false; boxes.push([x0, x1, y0, y1]); return true; };
   r.cut.forEach(c => {
     o += `<rect x="${X(c.t0).toFixed(2)}" y="${Y(c.z + c.h).toFixed(2)}" width="${((c.t1 - c.t0) * sx).toFixed(2)}" height="${((c.h) * sy + Math.max(0, Y(Math.min(zAtR(r, c.t0), zAtR(r, c.t1))) - Y(c.z))).toFixed(2)}" fill="#1b1b19"/>`;
     if ((c.t1 - c.t0) * sx > fs * 4 && c.h * sy > fs * 2) labels += `<text x="${(X(c.t0) + fs * .4).toFixed(2)}" y="${(Y(c.z) - fs * .5).toFixed(2)}" font-size="${fs * .75}" fill="#fff">${lvl(c.z)}</text>`;
-    if ((c.t1 - c.t0) * sx > fs * 2.2) labels += `<text x="${X((c.t0 + c.t1) / 2).toFixed(2)}" y="${(Y(c.z + c.h) - fs * .45).toFixed(2)}" font-size="${fs * .85}" text-anchor="middle" fill="#4a4945">${Math.round(c.h)} m${c.lv ? ' · ' + c.lv + ' fl' : ''}${c.known ? '' : '*'}</text>`;
+    const ht = `${Math.round(c.h)} m${c.lv ? ' · ' + c.lv + ' fl' : ''}${c.known ? '' : '*'}`, cx = X((c.t0 + c.t1) / 2), w2 = tw(ht, .85) / 2;
+    for (let k = 0; k < 2; k++) { const yb = Y(c.z + c.h) - fs * (.45 + k * 1.1); if (claim(cx - w2, cx + w2, yb - fs * .85, yb)) { labels += `<text x="${cx.toFixed(2)}" y="${yb.toFixed(2)}" font-size="${fs * .85}" text-anchor="middle" fill="#4a4945">${ht}</text>`; break; } }
   });
   o += `<polyline points="${terr.map(p => p.map(v => v.toFixed(2)).join(',')).join(' ')}" fill="none" stroke="#1b1b19" stroke-width="${sw * 2}"/>`;
   o += labels;
-  // Streets crossed.
-  r.roads.forEach(rd => {
+  // Streets crossed. Names go in up to three rows below the ground; a name that still collides is left out.
+  const rows = [[], [], []];
+  r.roads.slice().sort((a, b) => b.w - a.w).forEach(rd => {
     const z = zAtR(r, rd.t);
     o += `<line x1="${X(rd.t - rd.w / 2).toFixed(2)}" y1="${(Y(z) + fs * .4).toFixed(2)}" x2="${X(rd.t + rd.w / 2).toFixed(2)}" y2="${(Y(z) + fs * .4).toFixed(2)}" stroke="#c8553d" stroke-width="${sw * 2.5}"/>`;
-    if (rd.name && !/footway|path|service/.test(rd.kind)) o += `<text x="${X(rd.t).toFixed(2)}" y="${(Y(z) + fs * 1.6).toFixed(2)}" font-size="${fs * .8}" text-anchor="middle" fill="#c8553d">${esc(rd.name)}</text>`;
+    if (!rd.name || /footway|path|service/.test(rd.kind)) return;
+    const half = rd.name.length * fs * .8 * .29 + fs * .3, cx = Math.max(P + half, Math.min(X(r.L0) - half, X(rd.t))), k = rows.findIndex(row => row.every(([a, b]) => cx + half < a || cx - half > b));
+    if (k < 0) return;
+    rows[k].push([cx - half, cx + half]);
+    o += `<text x="${cx.toFixed(2)}" y="${(Y(z) + fs * (1.6 + k * 1.05)).toFixed(2)}" font-size="${fs * .8}" text-anchor="middle" fill="#c8553d">${esc(rd.name)}</text>`;
   });
   // Street H/W dimension.
   if (r.hw) {
     const y = Y(Math.max(zAtR(r, r.hw.a), zAtR(r, r.hw.b)) + Math.min(r.hw.H * .5, 6));
     o += `<line x1="${X(r.hw.a)}" y1="${y}" x2="${X(r.hw.b)}" y2="${y}" stroke="#2f5d8a" stroke-width="${sw}"/>` +
       [r.hw.a, r.hw.b].map(t => `<line x1="${X(t)}" y1="${y - fs * .4}" x2="${X(t)}" y2="${y + fs * .4}" stroke="#2f5d8a" stroke-width="${sw}"/>`).join('') +
-      `<text x="${X((r.hw.a + r.hw.b) / 2)}" y="${y - fs * .4}" font-size="${fs * .85}" text-anchor="middle" fill="#2f5d8a">W ${f1(r.hw.W)} m · H/W ${(r.hw.H / r.hw.W).toFixed(2)}</text>`;
+      (() => { const s = `W ${f1(r.hw.W)} m · H/W ${(r.hw.H / r.hw.W).toFixed(2)}`, cx = X((r.hw.a + r.hw.b) / 2), w2 = tw(s, .85) / 2;
+        for (let k = 0; k < 3; k++) { const yb = y - fs * (.4 + k * 1.1); if (claim(cx - w2, cx + w2, yb - fs * .85, yb)) return `<text x="${cx}" y="${yb}" font-size="${fs * .85}" text-anchor="middle" fill="#2f5d8a">${s}</text>`; }
+        return ''; })();
   }
   // Spot levels.
   const st = niceStep(r.L0), marks = [0];
@@ -341,7 +355,9 @@ function sectionSvg(r, { W = 1100, forPrint = null } = {}) {
   marks.push(r.L0);
   marks.forEach((t, i) => {
     const z = zAtR(r, t), x = X(t), y = Y(z), hidden = i > 0 && i < marks.length - 1 && r.cut.some(c => t > c.t0 - 1 && t < c.t1 + 1);
-    if (!hidden) o += `<path d="M${x} ${y} l${-fs * .35} ${-fs * .6} h${fs * .7}Z" fill="#1b1b19"/><text x="${x}" y="${y - fs * .8}" font-size="${fs * .8}" text-anchor="middle">${lvl(z)}</text>`;
+    const anc = i === 0 ? 'start' : i === marks.length - 1 ? 'end' : 'middle', tx = i === 0 ? x - fs * .35 : i === marks.length - 1 ? x + fs * .35 : x;   // the end levels stay inside the frame
+    const lw2 = tw(lvl(z), .8), lx0 = anc === 'start' ? tx : anc === 'end' ? tx - lw2 : tx - lw2 / 2;
+    if (!hidden && claim(lx0, lx0 + lw2, y - fs * 1.6, y)) o += `<path d="M${x} ${y} l${-fs * .35} ${-fs * .6} h${fs * .7}Z" fill="#1b1b19"/><text x="${tx}" y="${y - fs * .8}" font-size="${fs * .8}" text-anchor="${anc}">${lvl(z)}</text>`;
     o += `<line x1="${x}" y1="${Y(base)}" x2="${x}" y2="${Y(base) + fs * .5}" stroke="#1b1b19" stroke-width="${sw * .6}"/><text x="${x}" y="${Y(base) + fs * 1.5}" font-size="${fs * .75}" text-anchor="middle" fill="#8a8882">${Math.round(t)}</text>`;
   });
   o += `<line x1="${X(0)}" y1="${Y(base)}" x2="${X(r.L0)}" y2="${Y(base)}" stroke="#1b1b19" stroke-width="${sw * .6}"/>`;
