@@ -19,6 +19,7 @@ Free, browser-based design tools for architects and architecture students.
 | Precedent Finder | Prototype | [`tools/precedents/`](tools/precedents/index.html) |
 | Site Section | Prototype | [`tools/site-section/`](tools/site-section/index.html) |
 | Urban Analysis Map | Prototype | [`tools/urban-map/`](tools/urban-map/index.html) |
+| Isometric Map | Prototype | [`tools/iso-map/`](tools/iso-map/index.html) |
 | Programme & Adjacency | Experimental, not linked from the hub | [`tools/programme/`](tools/programme/index.html) |
 
 ### Sun & Shadow Study
@@ -75,11 +76,15 @@ Draw a line A–B (up to 1 km) on the map. Terrain: 100 samples along the line f
 
 Pick a frame (the A3 map area of 300 × 256 mm at 1:1000, 1:2000 or 1:5000) and load everything in it from Overpass in one query. Four sheets share the frame. Land use: buildings coloured by use from their own tags (`building`, `amenity`, `shop`, `office`, `tourism`); a residential building with shops or cafés mapped inside it becomes "residential with shops"; untagged buildings take the use of the `landuse` area around them, else stay "not tagged"; counts and footprint share per use. Transport: streets drawn by OSM road class (the usual proxy for traffic) with km per class in the frame, rail, tram and metro lines, and stops by mode (bus, dolmuş, tram, metro, rail, ferry; duplicates of the same stop within 40 m merged). Open space: parks, playgrounds, woods, cemeteries, beaches, squares and water with their area inside the frame, and mapped trees. Landmarks: named historic, listed (`heritage`), museum, attraction and tower features, numbered from the top. Three graphic styles: Atlas (muted flat colour on a pale ground, white party walls, one red accent), Riso (three overprinted inks, yellow, blue and pink, with multiply blending and a slight misregistration; mixed uses read as mixed inks) and Ink (black and white hatches and dot screens that photocopy cleanly). Exports: SVG per sheet, CSV of all counts, and a print of one sheet or all four as A3 landscape pages.
 
+### Isometric Map
+
+A 300 m to 1 km square around the site drawn as an isometric A3 sheet from eight directions, in three styles (Warm, Clay, Ink). One Overpass query brings buildings, building parts, streets, coastline, water, green, squares, trees, city walls, towers and minarets; terrain is a 12 × 12 grid from the Open-Meteo elevation API with building bumps removed by a morphological opening (the same as Site Section and 3D Context), drawn true or ×2. The sea is built from `natural=coastline` (land on the left), clipped to the square. Heights: OSM `height`, else `building:levels` × 3.2 m, else type defaults for monuments (minaret 45 m, mosque body scaled to its footprint with a dome on the main part, keep 20 m, defensive tower 14 m, city wall 10 m × 4 m, tomb with a dome), else an estimate from footprint size or a fixed floor count. A large `historic=castle` area is ground, not a building; walls get crenellations; `roof:shape=pyramidal|cone` and `dome` are drawn. Exports: SVG, PNG (4200 × 2970 px), A3 print, and the same scene as a 3D model (OBJ, DXF with 3D faces plus street, green, water and tree layers, and binary STL with a closed base for 3D printing) through `assets/lib/model.js`.
+
 ### Programme & Adjacency
 
 An editable space list (area, number, zone) from templates (house, primary school, library, office floor, student housing), net / gross / floor-plate totals, an adjacency matrix (must / near / apart) and a force-laid bubble diagram with circle area proportional to floor area. Draggable; kept in the browser; CSV schedule and SVG diagram export.
 
-All tools share `assets/atools.css` and `assets/atools.js`. Calculations used by more than one tool live in `assets/lib/`: `sun.js` (sun position, sun path), `climate.js` (Open-Meteo download, climate summary, charts, design notes) and `fabric.js` (OSM buildings, figure-ground drawing, building masses with heights). Also, the site set on the hub (or in any tool) is stored in the browser and reused by the others.
+All tools share `assets/atools.css` and `assets/atools.js`. Calculations used by more than one tool live in `assets/lib/`: `sun.js` (sun position, sun path), `climate.js` (Open-Meteo download, climate summary, charts, design notes) `fabric.js` (OSM buildings, figure-ground drawing, building masses with heights, roof stripping for the elevation model) and `model.js` (3D meshes and OBJ / DXF / STL writers). Also, the site set on the hub (or in any tool) is stored in the browser and reused by the others.
 
 Each tool is a single static HTML file with no build step. Open it in a browser or serve the repo with any static host.
 

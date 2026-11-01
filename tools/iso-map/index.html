@@ -1,0 +1,793 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Isometric Map · a_tools</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="../../assets/atools.css">
+<style>
+  .canvas.iso { display: flex; flex-direction: column; overflow: hidden; }
+  .isobar { display: flex; align-items: center; gap: 10px; padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--surface); }
+  .isobar .seg { width: 260px; }
+  .isobar .seg button[disabled] { opacity: .45; cursor: default; }
+  #map { flex: 1; min-height: 300px; }
+  .drawwrap { flex: 1; overflow: auto; padding: 16px; background: var(--bg); }
+  .drawwrap[hidden], #map[hidden] { display: none; }
+  .drawwrap svg { display: block; width: 100%; max-width: 1500px; height: auto; margin: 0 auto; box-shadow: 0 2px 12px rgba(0,0,0,.08); }
+  .checks { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 13px; }
+  .checks label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+  select { width: 100%; }
+  #printArea { display: none; }
+  @media print {
+    @page { size: A3 landscape; margin: 0; }
+    html, body { background: #fff !important; }
+    body > *:not(#printArea) { display: none !important; }
+    #printArea { display: block; }
+    #printArea svg { display: block; width: 420mm; height: 297mm; }
+  }
+</style>
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="../../index.html"><span class="brand-mark"></span>a_tools</a>
+  <span class="crumb">/ <b>Isometric Map</b></span>
+  <span class="spacer"></span>
+  <span class="site-pill" id="sitePill" hidden></span>
+</header>
+
+<main class="tool">
+  <aside class="panel">
+    <h1>Isometric Map</h1>
+    <p class="lead">A diorama of your site from open map data: buildings in 3D with sun shadows, streets, green, water and trees, with the main places labelled. Prints on A3.</p>
+
+    <div class="group">
+      <p class="group-title"><span class="step">1</span>Area</p>
+      <div class="row">
+        <input id="q" type="text" placeholder="Search a place">
+        <button id="go" class="btn" style="flex:0 0 auto">Go</button>
+      </div>
+      <p class="hint">The dashed square is the area drawn. Tap the map to move it.</p>
+      <div class="field" style="margin-top:10px"><span class="label">Size</span>
+        <div class="seg" id="size"><button data-v="300">300 m</button><button data-v="500" class="on">500 m</button><button data-v="700">700 m</button><button data-v="1000">1 km</button></div>
+      </div>
+      <button id="run" class="btn primary block">Draw the map</button>
+      <p class="hint" id="status"></p>
+    </div>
+
+    <div class="group">
+      <p class="group-title"><span class="step">2</span>Drawing</p>
+      <div class="field"><label for="view">Seen from</label>
+        <select id="view"><option value="225" selected>South-west</option><option value="180">South</option><option value="135">South-east</option><option value="90">East</option><option value="45">North-east</option><option value="0">North</option><option value="315">North-west</option><option value="270">West</option></select>
+      </div>
+      <div class="field"><span class="label">Style</span>
+        <div class="seg" id="style"><button data-v="warm" class="on">Warm</button><button data-v="clay">Clay</button><button data-v="ink">Ink</button></div>
+      </div>
+      <div class="field"><label for="terr">Terrain</label>
+        <select id="terr"><option value="0">Flat</option><option value="1" selected>True heights</option><option value="2">Exaggerated × 2</option></select>
+      </div>
+      <div class="field"><label for="hmode">Heights not in OSM</label>
+        <select id="hmode"><option value="est" selected>Estimate from footprint (1–6 floors)</option><option value="2">2 floors</option><option value="4">4 floors</option><option value="6">6 floors</option></select>
+      </div>
+      <div class="checks">
+        <label><input type="checkbox" id="optShadow" checked> Shadows</label>
+        <label><input type="checkbox" id="optTrees" checked> Trees</label>
+        <label><input type="checkbox" id="optLabels" checked> Labels</label>
+        <label><input type="checkbox" id="optFloors" checked> Floor lines</label>
+      </div>
+      <div class="field" style="margin-top:10px"><label for="title">Title</label><input id="title" type="text" placeholder="Place name"></div>
+      <div class="field"><label for="sub">Subtitle</label><input id="sub" type="text" placeholder="e.g. City centre and waterfront"></div>
+    </div>
+
+    <div class="group">
+      <div class="row">
+        <button id="svg" class="btn" disabled>SVG</button>
+        <button id="png" class="btn" disabled>PNG</button>
+        <button id="print" class="btn" disabled>A3 · PDF</button>
+      </div>
+      <p class="label" style="margin:12px 0 6px">3D model</p>
+      <div class="row">
+        <button id="xObj" class="btn" disabled>OBJ</button>
+        <button id="xDxf" class="btn" disabled>DXF</button>
+        <button id="xStl" class="btn" disabled>STL</button>
+      </div>
+      <p class="hint">The same scene as the drawing, in metres: ground, a base you can 3D-print, buildings with domes, roofs and minarets. The site point is at 0, 0 and north is +Y (OBJ is Y-up, so north is −Z there). <b>OBJ</b> Rhino, Blender, SketchUp. <b>DXF</b> 3D faces on layers, plus streets, green, water and trees as lines and points, for AutoCAD and Rhino. <b>STL</b> 3D printing.</p>
+      <p class="hint">Data © OpenStreetMap contributors. Heights come from OSM tags where they exist; the rest are estimated, so treat this as an illustration, not a survey. Click a label in the drawing to hide it.</p>
+    </div>
+  </aside>
+
+  <section class="canvas iso">
+    <div class="isobar">
+      <div class="seg" id="tabs"><button data-t="map" class="on">Map</button><button data-t="draw" disabled>Drawing</button></div>
+    </div>
+    <div id="map"></div>
+    <div class="drawwrap" id="draw" hidden></div>
+  </section>
+</main>
+<div id="printArea"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="../../assets/atools.js"></script>
+<script src="../../assets/lib/fabric.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/earcut@2.2.4/dist/earcut.min.js"></script>
+<script src="../../assets/lib/model.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+const rad = Math.PI / 180;
+let site = ATools.getSite() || { lat: 41.0082, lng: 28.9784, name: 'Istanbul' };
+let SIZE = 500, data = null, tab = 'map', style = 'warm';
+const hidden = new Set();   // labels the user clicked away
+const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+const num = v => { const x = parseFloat(String(v == null ? '' : v).replace(',', '.')); return isFinite(x) ? x : null; };
+
+// ---------- Area on the map ----------
+const map = ATools.baseMap('map', [site.lat, site.lng], 16);
+const frame = L.rectangle([[0, 0], [0, 0]], { color: '#1b1b19', weight: 1.5, fill: false, dashArray: '6 5', interactive: false }).addTo(map);
+function drawFrame(fit) {
+  const h = SIZE / 2, dLat = h / 110540, dLng = h / (111320 * Math.cos(site.lat * rad));
+  const b = [[site.lat - dLat, site.lng - dLng], [site.lat + dLat, site.lng + dLng]];
+  frame.setBounds(b); if (fit) map.fitBounds(b, { padding: [30, 30] });
+}
+drawFrame(true);
+map.on('click', e => { if (tab !== 'map') return; site = { lat: e.latlng.lat, lng: e.latlng.lng, name: site.name }; ATools.setSite(site); drawFrame(); });
+$('go').onclick = async () => {
+  const q = $('q').value.trim(); if (!q) return;
+  try { const s = await ATools.geocode(q); if (!s) return alert('Place not found.'); site = s; ATools.setSite(s); drawFrame(true); }
+  catch { alert('Search failed. Tap the map instead.'); }
+};
+$('q').addEventListener('keydown', e => { if (e.key === 'Enter') $('go').click(); });
+const seg = (id, fn) => document.querySelectorAll(`#${id} button`).forEach(b => b.onclick = () => {
+  if (b.disabled) return; document.querySelectorAll(`#${id} button`).forEach(x => x.classList.toggle('on', x === b)); fn(b.dataset.v || b.dataset.t);
+});
+seg('size', v => { SIZE = +v; drawFrame(true); });
+seg('style', v => { style = v; redraw(); });
+seg('tabs', t => showTab(t));
+['view', 'terr', 'hmode', 'optShadow', 'optTrees', 'optLabels', 'optFloors'].forEach(id => $(id).onchange = () => redraw());
+['title', 'sub'].forEach(id => $(id).oninput = () => redraw());
+function showTab(t) {
+  tab = t;
+  document.querySelectorAll('#tabs button').forEach(x => x.classList.toggle('on', x.dataset.t === t));
+  $('map').hidden = t !== 'map'; $('draw').hidden = t === 'map';
+  if (t === 'map') setTimeout(() => map.invalidateSize(), 0); else redraw();
+}
+let redrawT = 0;
+function redraw() { if (!data || tab !== 'draw') return; clearTimeout(redrawT); redrawT = setTimeout(() => { $('draw').innerHTML = drawing(); bindLabels(); }, 30); }
+function bindLabels() {
+  $('draw').querySelectorAll('[data-label]').forEach(g => g.onclick = () => { hidden.add(g.dataset.label); redraw(); });
+}
+
+// ---------- Data ----------
+async function run() {
+  const R = SIZE / 2, o = { ...site }, pad = R + 40;
+  const dLat = pad / 110540, dLng = pad / (111320 * Math.cos(o.lat * rad));
+  const bb = [o.lat - dLat, o.lng - dLng, o.lat + dLat, o.lng + dLng].map(x => x.toFixed(6)).join(',');
+  const q = `[out:json][timeout:120][bbox:${bb}];
+    (nwr["building"];way["highway"];way["natural"="coastline"];nwr["natural"~"^(water|wood|scrub|grassland|beach|tree|tree_row)$"];nwr["waterway"="riverbank"];
+     nwr["leisure"~"^(park|garden|playground|pitch|common|recreation_ground|sports_centre|stadium)$"];nwr["landuse"~"^(grass|forest|recreation_ground|cemetery|meadow|village_green|reservoir|basin)$"];
+     nwr["amenity"~"^(parking|school|university|college|hospital|place_of_worship|townhall|ferry_terminal)$"];nwr["place"="square"];
+     nwr["historic"]["name"];nwr["tourism"~"^(attraction|museum|viewpoint|gallery)$"]["name"];nwr["man_made"~"^(tower|lighthouse|pier|minaret)$"];way["building:part"];way["barrier"="city_wall"];way["historic"="citywalls"];); out geom;`;
+  $('run').disabled = true; $('status').innerHTML = '<span class="spinner"></span>Loading OpenStreetMap data…';
+  try {
+    const [osm, ter] = await Promise.allSettled([ATools.overpass(q, 120000), terrainGrid(o, R)]);
+    if (osm.status !== 'fulfilled') throw osm.reason;
+    data = build(osm.value, o, R);
+    data.terr = ter.status === 'fulfilled' ? ter.value : null;
+    if (!data.blds.length && !data.roads.length) { data = null; $('status').textContent = 'Nothing is mapped in OpenStreetMap here. Move the square or make it larger.'; }
+    else {
+      hidden.clear(); data.blds.forEach(b => Object.assign(b, heightOf(b, $('hmode').value)));
+      const bl = data.blds.filter(b => !b.wall), est = bl.filter(b => !b.known).length;
+      $('status').textContent = `${bl.length.toLocaleString('en-GB')} buildings (${Math.round(100 * est / Math.max(1, bl.length))}% without a height in OSM), ${data.labels.length} named places. `
+        + (data.terr ? `Ground ${Math.round(data.terr.min)}–${Math.round(data.terr.min + data.terr.range)} m.` : 'Terrain could not be loaded, so the ground is flat.');
+      $('title').placeholder = o.name || 'Place name';
+      document.querySelector('#tabs button[data-t="draw"]').disabled = false;
+      ['svg', 'png', 'print', 'xObj', 'xDxf', 'xStl'].forEach(id => $(id).disabled = false);
+      ATools.track && ATools.track('iso-map/draw');
+      document.querySelectorAll('#tabs button').forEach(x => x.classList.toggle('on', x.dataset.t === 'draw'));
+      showTab('draw');
+    }
+  } catch (e) { $('status').textContent = ATools.errorText(e, 'map data', SIZE >= 1000); }
+  $('run').disabled = false;
+}
+$('run').onclick = run;
+
+// Elevation grid (12 × 12) over the square, from Copernicus GLO-90 via Open-Meteo. It is a surface model, so an
+// opening strips the roofs of dense blocks; heights are relative to the lowest point.
+async function terrainGrid(o, R) {
+  const n = 12, step = 2 * R / (n - 1), pts = [];
+  for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) { const x = -R + i * step, y = -R + j * step; pts.push([o.lat + y / 110540, o.lng + x / (111320 * Math.cos(o.lat * rad))]); }
+  const e = [];
+  for (let k = 0; k < pts.length; k += 72) {
+    const ch = pts.slice(k, k + 72);
+    const jj = await ATools.fetchJson(`https://api.open-meteo.com/v1/elevation?latitude=${ch.map(p => p[0].toFixed(5)).join(',')}&longitude=${ch.map(p => p[1].toFixed(5)).join(',')}`, {}, 20000);
+    if (!jj.elevation || jj.elevation.length !== ch.length) throw new Error('elevation');
+    e.push(...jj.elevation);
+  }
+  const g = ATFabric.openGrid(e, n, step, Math.max(100, 2 * step)), min = Math.min(...g);
+  return { n, R, step, min, range: Math.max(...g) - min, e: g.map(v => v - min) };
+}
+const hash = s => { let h = 2166136261; for (const c of String(s)) { h ^= c.charCodeAt(0); h = Math.imul(h, 16777619); } return h >>> 0; };
+const area = r => { let a = 0; for (let i = 0; i < r.length; i++) { const p = r[i], q = r[(i + 1) % r.length]; a += p[0] * q[1] - q[0] * p[1]; } return a / 2; };
+// Sutherland–Hodgman against the square |x|,|y| <= R.
+function clipSq(ring, R) {
+  let out = ring;
+  for (const [ax, sgn] of [[0, 1], [0, -1], [1, 1], [1, -1]]) {
+    const inp = out; out = [];
+    const ins = p => sgn * p[ax] <= R;
+    for (let i = 0; i < inp.length; i++) {
+      const p = inp[i], q = inp[(i + 1) % inp.length];
+      const cut = () => { const t = (sgn * R - p[ax]) / (q[ax] - p[ax]); return [p[0] + t * (q[0] - p[0]), p[1] + t * (q[1] - p[1])]; };
+      if (ins(q)) { if (!ins(p)) out.push(cut()); out.push(q); } else if (ins(p)) out.push(cut());
+    }
+    if (!out.length) break;
+  }
+  return out;
+}
+const centroid = r => { let x = 0, y = 0; r.forEach(p => { x += p[0]; y += p[1]; }); return [x / r.length, y / r.length]; };
+
+function build(j, o, R) {
+  const P = g => ATFabric.xy(g.lat, g.lon, o);
+  const ringsOf = el => {
+    if (el.type === 'way') return el.geometry && el.geometry.length > 3 ? [{ outer: el.geometry.map(P), holes: [] }] : [];
+    const ms = (el.members || []).filter(m => m.geometry && m.geometry.length > 3);
+    const polys = ms.filter(m => m.role !== 'inner').map(m => ({ outer: m.geometry.map(P), holes: [] }));
+    ms.filter(m => m.role === 'inner').forEach(m => { const h = m.geometry.map(P), p = polys.find(p => ATFabric.inside(h[0], p.outer)); if (p) p.holes.push(h); });
+    return polys;
+  };
+  const D = { o, R, blds: [], green: [], plaza: [], park: [], school: [], water: [], coast: [], roads: [], trees: [], labels: [], lmPts: [], spires: [], heritage: [] };
+  const inside = p => Math.abs(p[0]) <= R && Math.abs(p[1]) <= R;
+  const LMB = t => !!(t.historic || t.heritage || t.amenity === 'place_of_worship' || /^(mosque|church|cathedral|chapel|synagogue|temple)$/.test(t.building || '') || /^(townhall)$/.test(t.amenity || '') || t.tourism === 'museum' || /^(tower|lighthouse)$/.test(t.man_made || ''));
+  j.elements.forEach(el => {
+    const t = el.tags || {};
+    // Minarets and free-standing towers: slim cylinders.
+    const minaret = t.man_made === 'minaret' || t['tower:type'] === 'minaret' || t['building:part'] === 'minaret' || t.building === 'minaret';
+    if (minaret || (t.man_made === 'tower' && !t.building && !t['building:part'])) {
+      const c = el.type === 'node' ? P(el) : el.geometry ? centroid(el.geometry.map(P)) : null;
+      const sh = num(t.height) || (minaret ? 45 : t['tower:type'] === 'defensive' ? 14 : 15), cone = num(t['roof:height']) || (minaret ? Math.max(4, sh * .15) : 3);
+      if (c && inside(c)) D.spires.push({ h: sh - (num(t.height) ? cone : 0), cone, p: c, r: minaret ? 1.75 : el.type === 'node' ? (t['tower:type'] === 'defensive' ? 4.5 : 2.5) : Math.max(1.5, Math.sqrt(Math.abs(area(el.geometry.map(P))) / Math.PI)), minaret, name: t.name || '' });
+      if (minaret || el.type === 'node') return;
+    }
+    // City walls: each segment becomes a thin wall block.
+    if ((t.barrier === 'city_wall' || t.historic === 'citywalls') && el.type === 'way' && el.geometry) {
+      const l = el.geometry.map(P), th = (num(t.width) || 4) / 2, hh = num(t.height) || 10;
+      for (let i = 0; i + 1 < l.length; i++) {
+        const a = l[i], b = l[i + 1], L0 = Math.hypot(b[0] - a[0], b[1] - a[1]); if (L0 < 0.5) continue;
+        const nx = -(b[1] - a[1]) / L0 * th, ny = (b[0] - a[0]) / L0 * th, ex = (b[0] - a[0]) / L0 * th * 0.9, ey = (b[1] - a[1]) / L0 * th * 0.9;
+        let rg = [[a[0] - ex - nx, a[1] - ey - ny], [b[0] + ex - nx, b[1] + ey - ny], [b[0] + ex + nx, b[1] + ey + ny], [a[0] - ex + nx, a[1] - ey + ny]];
+        if (area(rg) < 0) rg.reverse(); rg = clipSq(rg, R); if (rg.length < 3) continue;
+        D.blds.push({ outer: rg, holes: [], t: { height: String(hh) }, id: el.id + '-' + i, c: centroid(rg), a: Math.abs(area(rg)), lm: true, name: '', wall: true });
+      }
+      if (!t.building) return;
+    }
+    if ((t.building || t['building:part']) && el.type !== 'node') {
+      ringsOf(el).forEach(p => {
+        if (Math.abs(area(p.outer)) < 4) return;
+        const c = centroid(p.outer); if (!inside(c)) return;
+        let outer = p.outer.slice(0, -1); if (area(outer) < 0) outer.reverse();
+        outer = clipSq(outer, R); if (outer.length < 3) return;
+        const holes = p.holes.map(h => { let r = h.slice(0, -1); if (area(r) > 0) r.reverse(); return r; }).filter(r => r.length > 2 && r.every(inside));
+        const a = Math.abs(area(outer)), part = !!t['building:part'] && !t.building;
+        if ((t.building === 'castle' || (t.historic === 'castle' && t.building)) && a > 2500) {
+          D.heritage.push({ outer: p.outer, holes: [] });
+          wallRing(outer, D, R, el.id, 4, num(t.height) || 12);
+          return;
+        }
+        const dome = t['roof:shape'] === 'dome' || t['building:part'] === 'dome' || t['roof:shape'] === 'onion' || (!t['roof:shape'] && (/^(tomb|mausoleum)$/.test(t.building || '') || t.historic === 'tomb'));
+        D.blds.push({ outer, holes, t, id: el.id, c, a, lm: LMB(t), name: part ? '' : t.name || '', part, dome, mosque: !part && (t.building === 'mosque' || (t.amenity === 'place_of_worship' && t.religion === 'muslim')) });
+      });
+      return;
+    }
+    if (t.natural === 'coastline' && el.geometry) { D.coast.push(el.geometry.map(P)); return; }
+    if (t.highway && el.type === 'way' && el.geometry) {
+      if (t.area === 'yes') { if (t.highway === 'pedestrian') ringsOf(el).forEach(p => D.plaza.push(p)); return; }
+      const w = RW[t.highway]; if (!w) return;
+      D.roads.push({ line: el.geometry.map(P), w, ped: /^(pedestrian|footway|path|steps|cycleway|living_street|track)$/.test(t.highway) });
+      return;
+    }
+    if (t.natural === 'tree' && el.type === 'node') { const p = P(el); if (inside(p)) D.trees.push(p); return; }
+    if (t.natural === 'tree_row' && el.geometry) { treeRow(el.geometry.map(P), D, inside); return; }
+    if (el.type !== 'node') {
+      const ps = ringsOf(el);
+      if (t.natural === 'water' || t.waterway === 'riverbank' || /^(reservoir|basin)$/.test(t.landuse || '')) D.water.push(...ps);
+      else if (t.place === 'square' || t.leisure === 'common') D.plaza.push(...ps);
+      else if (/^(park|garden|playground|recreation_ground)$/.test(t.leisure || '') || /^(grass|forest|recreation_ground|cemetery|meadow|village_green)$/.test(t.landuse || '') || /^(wood|scrub|grassland)$/.test(t.natural || '')) ps.forEach(p => D.green.push({ ...p, wood: /forest|wood/.test(t.landuse || t.natural || ''), cem: t.landuse === 'cemetery' }));
+      else if (t.amenity === 'parking') D.park.push(...ps);
+      else if (/^(school|university|college|hospital)$/.test(t.amenity || '') || /^(pitch|sports_centre|stadium)$/.test(t.leisure || '')) D.school.push(...ps);
+      else if (t.natural === 'beach') D.plaza.push(...ps);
+      if (/^(castle|fort|fortress|citywalls)$/.test(t.historic || '') && !t.building) D.heritage.push(...ps);
+    }
+    // Named places for labels.
+    if (t.name && (LMB(t) || t.place === 'square' || /^(park|garden)$/.test(t.leisure || '') || t.amenity === 'ferry_terminal' || /^(attraction|viewpoint|gallery)$/.test(t.tourism || ''))) {
+      const c = el.type === 'node' ? P(el) : (ringsOf(el)[0] ? centroid(ringsOf(el)[0].outer) : el.geometry ? centroid(el.geometry.map(P)) : null);
+      if (c && inside(c)) D.lmPts.push({ name: t.name, p: c, rank: LMB(t) ? 2 : t.place === 'square' || t.amenity === 'ferry_terminal' ? 1.5 : 1, a: el.type === 'node' ? 0 : Math.abs(area((ringsOf(el)[0] || { outer: [] }).outer)) });
+    }
+  });
+  // Building parts replace the outline they sit in (the outline only says "this is one building").
+  const parts = D.blds.filter(b => b.part);
+  D.blds.filter(b => !b.part && !b.wall).forEach(b => {
+    const inner = parts.filter(q => !q.parent && ATFabric.inside(q.c, b.outer));
+    if (!inner.length) return;
+    inner.forEach(q => { q.lm = q.lm || b.lm; q.parent = b; });
+    // Simple 3D Buildings: parts replace the outline. When the parts cover only a small share, keep the outline as the body.
+    if (inner.reduce((s, q) => s + q.a, 0) > 0.3 * b.a) b.hidden = true;
+    if (b.mosque) {   // the dome goes on the main part (domes are rarely tagged)
+      const big = inner.filter(q => q.t['tower:type'] !== 'minaret' && !/pyramidal|cone|conical/.test(q.t['roof:shape'] || '') && q.a > 150).sort((x, y) => y.a - x.a)[0];
+      if (big) { if (!big.dome) big.mosque = true; b.mosque = false; }
+    }
+  });
+  // Spires that stand on a building start from its roof.
+  D.spires.forEach(sp => { const b = D.blds.find(b => !b.hidden && ATFabric.inside(sp.p, b.outer)); if (b) sp.on = b; });
+  // A named landmark point inside a building makes that building a landmark.
+  D.lmPts.forEach(l => { const b = D.blds.find(b => !b.hidden && !b.wall && ATFabric.inside(l.p, b.outer)); if (b && l.rank >= 2) { b.lm = true; b.name = b.name || l.name; l.b = b;
+    if (/t[üu]rbe|tomb|mausoleum|k[üu]mbet/i.test(l.name) && !b.t['roof:shape'] && b.a < 600) b.dome = b.tomb = true; } });
+  D.blds = D.blds.filter(b => !b.hidden);
+  D.blds.forEach(b => { if (b.lm && b.name && !D.lmPts.some(l => l.b === b || l.name === b.name)) D.lmPts.push({ name: b.name, p: b.c, rank: 2, a: b.a, b }); });
+  // Labels: landmarks first, then squares and parks by size; at most 14.
+  const seen = new Set();
+  D.labels = D.lmPts.sort((a, b) => b.rank - a.rank || b.a - a.a).filter(l => { const k = l.name.toLowerCase(); if (seen.has(k)) return false; seen.add(k); return true; }).slice(0, 14);
+  // Trees scattered in parks (not in woods, which get denser cover), deterministic.
+  let seed = 7; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  D.green.forEach(g => {
+    const r = g.outer, a = Math.abs(area(r)); if (a < 60) return;
+    const n = Math.min(400, Math.round(a / (g.wood ? 45 : g.cem ? 160 : 110)));
+    const xs = r.map(p => p[0]), ys = r.map(p => p[1]), x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+    for (let k = 0, got = 0; k < n * 4 && got < n && D.trees.length < 2500; k++) {
+      const p = [x0 + rnd() * (x1 - x0), y0 + rnd() * (y1 - y0)];
+      if (inside(p) && ATFabric.inside(p, r) && !g.holes.some(h => ATFabric.inside(p, h))) { D.trees.push(p); got++; }
+    }
+  });
+  D.sea = seaRings(D.coast, R);
+  return D;
+}
+// Extrude a closed ring as a 'th' m thick wall (castle enclosures, Rumeli Hisarı-style outlines).
+function wallRing(rg, D, R, id, th, hh) {
+  rg.forEach((a, i) => {
+    const b = rg[(i + 1) % rg.length], L0 = Math.hypot(b[0] - a[0], b[1] - a[1]); if (L0 < 0.5) return;
+    const nx = -(b[1] - a[1]) / L0 * th / 2, ny = (b[0] - a[0]) / L0 * th / 2, ex = (b[0] - a[0]) / L0 * th * .45, ey = (b[1] - a[1]) / L0 * th * .45;
+    let q = [[a[0] - ex - nx, a[1] - ey - ny], [b[0] + ex - nx, b[1] + ey - ny], [b[0] + ex + nx, b[1] + ey + ny], [a[0] - ex + nx, a[1] - ey + ny]];
+    if (area(q) < 0) q.reverse(); q = clipSq(q, R); if (q.length < 3) return;
+    D.blds.push({ outer: q, holes: [], t: { height: String(hh) }, id: id + '-r' + i, c: centroid(q), a: Math.abs(area(q)), lm: true, name: '', wall: true });
+  });
+}
+const RW = { motorway: 16, trunk: 14, primary: 13, primary_link: 8, secondary: 11, secondary_link: 7, tertiary: 9, tertiary_link: 6, residential: 6.5, unclassified: 6,
+  living_street: 6, service: 4.5, pedestrian: 7, footway: 2.6, path: 2, cycleway: 2.5, steps: 2.6, track: 3 };
+function treeRow(l, D, inside) {
+  for (let i = 0; i + 1 < l.length; i++) { const a = l[i], b = l[i + 1], L0 = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    for (let d = 0; d < L0; d += 8) { const p = [a[0] + (b[0] - a[0]) * d / L0, a[1] + (b[1] - a[1]) * d / L0]; if (inside(p)) D.trees.push(p); } }
+}
+
+// ---------- Sea from the coastline ----------
+// OSM coastlines run with land on the left. Join the ways into chains, cut them to the square, and close each
+// piece along the square's edge clockwise (keeping the sea on the right).
+function seaRings(ways, R) {
+  if (!ways.length) return [];
+  const key = p => p[0].toFixed(2) + ',' + p[1].toFixed(2);
+  let chains = ways.map(w => w.slice());
+  for (let merged = true; merged;) {
+    merged = false;
+    for (let i = 0; i < chains.length && !merged; i++) for (let k = 0; k < chains.length; k++) {
+      if (i === k) continue;
+      if (key(chains[i][chains[i].length - 1]) === key(chains[k][0])) { chains[i] = chains[i].concat(chains[k].slice(1)); chains.splice(k, 1); merged = true; break; }
+    }
+  }
+  const ins = p => Math.abs(p[0]) < R && Math.abs(p[1]) < R;   // strict: a vertex on the edge counts as outside, so the piece still gets an entry
+  const per = p => { const [x, y] = p, e = 1e-6;   // position along the edge, counter-clockwise from the south-west corner
+    if (Math.abs(y + R) < e) return x + R; if (Math.abs(x - R) < e) return 2 * R + y + R; if (Math.abs(y - R) < e) return 4 * R + (R - x); return 6 * R + (R - y); };
+  const cross = (p, q) => {   // first point where segment p→q meets the square's edge, with its t
+    let best = null;
+    for (const [ax, v] of [[0, R], [0, -R], [1, R], [1, -R]]) {
+      if (q[ax] === p[ax]) continue;
+      const t = (v - p[ax]) / (q[ax] - p[ax]); if (t < 0 || t > 1) continue;
+      const pt = [p[0] + t * (q[0] - p[0]), p[1] + t * (q[1] - p[1])], o = 1 - ax;
+      if (Math.abs(pt[o]) <= R + 1e-9 && (!best || t < best.t)) best = { t, pt: [Math.max(-R, Math.min(R, pt[0])), Math.max(-R, Math.min(R, pt[1]))] };
+    }
+    return best;
+  };
+  const pieces = [], islands = [];
+  chains.forEach(c0 => {
+    let c = c0; const closed = key(c[0]) === key(c[c.length - 1]);
+    if (closed && c.every(ins)) { islands.push(c); return; }
+    if (!closed && c.length > 1) {   // a chain that stops inside the square (data cut short): extend its end segments outwards
+      const ext = (a, b) => { const dx = b[0] - a[0], dy = b[1] - a[1], L0 = Math.hypot(dx, dy) || 1; return [b[0] + dx / L0 * 4 * R, b[1] + dy / L0 * 4 * R]; };
+      if (ins(c[0])) c = [ext(c[1], c[0]), ...c];
+      if (ins(c[c.length - 1])) c = [...c, ext(c[c.length - 2], c[c.length - 1])];
+    }
+    let cur = ins(c[0]) ? null : null;
+    for (let i = 0; i + 1 < c.length; i++) {
+      const p = c[i], q = c[i + 1], pi = ins(p), qi = ins(q);
+      if (pi && cur) cur.push(p);
+      if (pi && !qi) { const x = cross(q, p); if (cur && x) { cur.push(x.pt); cur.exit = x.pt; pieces.push(cur); } cur = null; }
+      else if (!pi && qi) { const x = cross(p, q); cur = x ? [x.pt] : null; if (cur) cur.entry = x.pt; }
+      else if (!pi && !qi) {   // a segment may pass through the square without a vertex inside
+        const a = cross(p, q), b = cross(q, p);
+        if (a && b && Math.hypot(a.pt[0] - b.pt[0], a.pt[1] - b.pt[1]) > 0.01) { const pc = [a.pt, b.pt]; pc.entry = a.pt; pc.exit = b.pt; pieces.push(pc); }
+      }
+    }
+  });
+  if (!pieces.length) {   // no coastline crosses the square: either all land, or open sea around islands
+    if (!islands.length) return [];
+    return [{ outer: [[-R, -R], [R, -R], [R, R], [-R, R]], holes: islands }];
+  }
+  const corners = [[-R, -R, 0], [R, -R, 2 * R], [R, R, 4 * R], [-R, R, 6 * R]];
+  const used = new Set(), rings = [];
+  pieces.forEach((pc, i0) => {
+    if (used.has(i0)) return;
+    const ring = []; let i = i0, guard = 0;
+    while (guard++ < 50) {
+      used.add(i); const cur = pieces[i]; ring.push(...cur);
+      // Walk clockwise (decreasing perimeter position) from this exit to the nearest entry.
+      const se = per(cur.exit);
+      let bestJ = -1, bestD = Infinity;
+      pieces.forEach((pj, j) => { const d = ((se - per(pj.entry)) % (8 * R) + 8 * R) % (8 * R); if (d < bestD) { bestD = d; bestJ = j; } });
+      corners.slice().sort((a, b) => b[2] - a[2]).concat(corners.slice().sort((a, b) => b[2] - a[2]).map(c => [c[0], c[1], c[2] - 8 * R]))
+        .forEach(c => { const d = se - c[2]; if (d > 1e-6 && d < bestD) ring.push([c[0], c[1]]); });
+      if (bestJ === i0 || used.has(bestJ)) break;
+      i = bestJ;
+    }
+    rings.push({ outer: ring, holes: islands.filter(s => ATFabric.inside(s[0], ring)) });
+  });
+  return rings;
+}
+
+// ---------- Styles ----------
+const STY = {
+  warm: { bg: ['#fbfaf6', '#f1eee6'], sea: '#a9cbd6', sea2: '#94bcc9', waves: '#ffffff', land: '#ece6d9', green: '#bdd3a0', wood: '#a9c48a', cem: '#cfd8bd', plaza: '#e2d6bd', park: '#d9d4ca', school: '#e4dccb',
+    road: '#ffffff', roadedge: '#cfc6b5', ped: '#f6efe0', roof: '#f7f3ea', wallLit: '#e3dccd', wallDark: '#b9b0a0', line: '#5b5650', lmRoof: '#e0a07f', lmLit: '#d48d6a', lmDark: '#a96248',
+    ink: '#2f2c28', mute: '#77716a', base: '#cfc5b3', base2: '#b3a893', shadow: '#6d6455', tree: '#a9c48a', treeLine: '#7f9a63', trunk: '#8a7a62', coastLine: '#8fa9b0', name: 'Warm' },
+  clay: { bg: ['#f7f6f3', '#ecebe7'], sea: '#d3dbde', sea2: '#c1cbcf', waves: '#ffffff', land: '#eae7e0', green: '#dfe3d5', wood: '#d6dccb', cem: '#e3e5dc', plaza: '#e6e1d6', park: '#e2dfd8', school: '#e8e5de',
+    road: '#f8f7f4', roadedge: '#d9d5cc', ped: '#f2f0eb', roof: '#ffffff', wallLit: '#f3f1ec', wallDark: '#cbc6bc', line: '#8f897f', lmRoof: '#efc1a8', lmLit: '#e6ad8f', lmDark: '#c08166',
+    ink: '#2f2c28', mute: '#807a72', base: '#dcd7cd', base2: '#c8c2b6', shadow: '#55504a', tree: '#ffffff', treeLine: '#b9b3a8', trunk: '#b9b3a8', coastLine: '#b6c2c6', name: 'Clay' },
+  ink: { bg: ['#ffffff', '#ffffff'], sea: '#ffffff', sea2: '#e6e6e6', waves: '#111111', land: '#ffffff', green: '#ffffff', wood: '#ffffff', cem: '#ffffff', plaza: '#f2f2f2', park: '#f2f2f2', school: '#f7f7f7',
+    road: '#ffffff', roadedge: '#9a9a9a', ped: '#ffffff', roof: '#ffffff', wallLit: '#f2f2f2', wallDark: '#a3a3a3', line: '#111111', lmRoof: '#111111', lmLit: '#4a4a4a', lmDark: '#111111',
+    ink: '#111111', mute: '#555555', base: '#ffffff', base2: '#d0d0d0', shadow: '#000000', tree: '#ffffff', treeLine: '#111111', trunk: '#111111', coastLine: '#111111', greenDots: true, name: 'Ink' }
+};
+const mix = (a, b, t) => { const A = [1, 3, 5].map(i => parseInt(a.slice(i, i + 2), 16)), B = [1, 3, 5].map(i => parseInt(b.slice(i, i + 2), 16)); return '#' + A.map((v, i) => Math.round(v + (B[i] - v) * t).toString(16).padStart(2, '0')).join(''); };
+
+// ---------- Drawing ----------
+const W = 1680, H = 1188, MAPW = 1320;   // A3 landscape at 4 px per mm
+const COMPASS = ['north', 'north-east', 'east', 'south-east', 'south', 'south-west', 'west', 'north-west'];
+const dirName = az => COMPASS[Math.round(((az % 360) + 360) % 360 / 45) % 8];
+let drawN = 0;
+function heightOf(b, mode) {
+  const t = b.t, h = num(t.height), lv = num(t['building:levels']), m = num(t.min_height) || (num(t['building:min_level']) || 0) * 3.2;
+  if (h && h > 0) return { h: Math.min(h, 300), m: Math.min(m, h - 0.5), known: true };
+  if (lv && lv > 0) return { h: (lv + (num(t['roof:levels']) || 0)) * 3.2, m, known: true };
+  // Monuments rarely carry heights in OSM: defaults by type (checked against Çimenlik, Süleymaniye, Selimiye, Galata).
+  const tt = t['tower:type'] || '';
+  if (tt === 'minaret' || t['building:part'] === 'minaret') return { h: 45, m, known: false };
+  if (t.man_made === 'tower' || t.building === 'tower') return { h: tt === 'clock' || /saat/i.test(t.name || '') ? 18 : 14, m, known: false };
+  if (t.historic === 'castle' || t.building === 'castle') return { h: 20, m, known: false };
+  if (t.building === 'mosque' || (t.amenity === 'place_of_worship' && t.religion === 'muslim')) return { h: Math.round(Math.min(24, Math.max(9, 4 + Math.sqrt(b.a) * 0.2))), m, known: false };
+  if (b.tomb || /^(tomb|mausoleum)$/.test(t.building || '') || t.historic === 'tomb') return { h: Math.round(Math.min(14, Math.max(5, Math.sqrt(b.a) * 0.9))), m, known: false };
+  if (/^(church|cathedral|chapel|synagogue)$/.test(t.building || '') || t.amenity === 'place_of_worship') return { h: 14, m, known: false };
+  if (b.part) return { h: Math.max(m + 3.2, b.parent ? heightOf(b.parent, mode).h : 9), m, known: false };
+  let fl;
+  if (mode === 'est') {
+    const r = hash(b.id);
+    fl = b.a < 35 ? 1 + r % 2 : b.a < 120 ? 2 + r % 3 : b.a < 600 ? 3 + r % 4 : 3 + r % 3;
+    if (/^(school|public|civic|hospital|office|commercial)$/.test(t.building || '')) fl = Math.max(fl, 3);
+    if (/^(garage|garages|shed|kiosk|roof|hut|carport)$/.test(t.building || '')) fl = 1;
+  } else fl = +mode;
+  return { h: fl * 3.2, m: 0, known: false };
+}
+
+// Ground height (relative, metres) at plan x, y from the elevation grid; 0 without terrain.
+function groundFn(D, ex) {
+  const Tg = D.terr;
+  if (!Tg || !ex || Tg.range < 1.5) return null;
+  const n = Tg.n;
+  return (x, y) => {
+    const gx = Math.min(n - 1.0001, Math.max(0, (x + Tg.R) / Tg.step)), gy = Math.min(n - 1.0001, Math.max(0, (y + Tg.R) / Tg.step));
+    const i = Math.floor(gx), j = Math.floor(gy), fx = gx - i, fy = gy - j, E = (a, b) => Tg.e[b * n + a];
+    return ex * (E(i, j) * (1 - fx) * (1 - fy) + E(i + 1, j) * fx * (1 - fy) + E(i, j + 1) * (1 - fx) * fy + E(i + 1, j + 1) * fx * fy);
+  };
+}
+// Split long edges so a draped polygon or line follows the terrain.
+function densify(pts, maxLen, closed) {
+  const out = [], m = closed ? pts.length : pts.length - 1;
+  for (let i = 0; i < m; i++) {
+    const p = pts[i], q = pts[(i + 1) % pts.length], k = Math.max(1, Math.ceil(Math.hypot(q[0] - p[0], q[1] - p[1]) / maxLen));
+    for (let s = 0; s < k; s++) out.push([p[0] + (q[0] - p[0]) * s / k, p[1] + (q[1] - p[1]) * s / k]);
+  }
+  if (!closed && pts.length) out.push(pts[pts.length - 1]);
+  return out;
+}
+// Cut a polyline to the square |x|,|y| <= R; returns the pieces inside.
+function clipLine(l, R) {
+  const out = []; let cur = null;
+  for (let i = 0; i + 1 < l.length; i++) {
+    let [x0, y0] = l[i], [x1, y1] = l[i + 1], t0 = 0, t1 = 1; const dx = x1 - x0, dy = y1 - y0; let ok = true;
+    [[-dx, x0 + R], [dx, R - x0], [-dy, y0 + R], [dy, R - y0]].forEach(([p, q]) => {
+      if (!ok) return;
+      if (Math.abs(p) < 1e-12) { if (q < 0) ok = false; return; }
+      const t = q / p; if (p < 0) { if (t > t1) ok = false; else if (t > t0) t0 = t; } else { if (t < t0) ok = false; else if (t < t1) t1 = t; }
+    });
+    if (!ok) { if (cur) { out.push(cur); cur = null; } continue; }
+    const a = [x0 + t0 * dx, y0 + t0 * dy], b = [x0 + t1 * dx, y0 + t1 * dy];
+    if (!cur) cur = [a]; cur.push(b);
+    if (t1 < 1) { out.push(cur); cur = null; }
+  }
+  if (cur) out.push(cur);
+  return out.filter(c => c.length > 1);
+}
+
+function drawing() {
+  const D = data, C = STY[style], R = D.R, P_ = 'iso' + (++drawN) + '-';
+  const view = +$('view').value, mode = $('hmode').value, showSh = $('optShadow').checked, showTr = $('optTrees').checked, showLb = $('optLabels').checked, ex = +$('terr').value;
+  const f = [Math.sin((view + 180) * rad), Math.cos((view + 180) * rad)], r = [f[1], -f[0]], KY = 0.56, KZ = 0.95;
+  const sunAz = view - 75, sunAlt = 38, sd = [-Math.sin(sunAz * rad) / Math.tan(sunAlt * rad), -Math.cos(sunAz * rad) / Math.tan(sunAlt * rad)], sunV = [Math.sin(sunAz * rad), Math.cos(sunAz * rad)];
+  const depth = (x, y) => x * f[0] + y * f[1];
+  const proj = (x, y, z = 0) => [x * r[0] + y * r[1], -(x * f[0] + y * f[1]) * KY - z * KZ];
+  const gf = groundFn(D, ex), gz = gf || (() => 0), hasT = !!gf;
+  D.blds.forEach(b => { const hh = heightOf(b, mode); b.h = hh.h; b.m = hh.m || 0; b.known = hh.known; b.z0 = hasT ? Math.min(...b.outer.map(p => gz(p[0], p[1]))) : 0; });
+  const seaZ = hasT ? Math.max(-6, -D.terr.min * ex) : 0, tMax = hasT ? D.terr.range * ex : 0;
+  const topZ = Math.max(tMax + 15, Math.min(tMax + 80, Math.max(20, ...D.blds.map(b => b.z0 + b.h))));
+  const T0 = Math.max(10, R * 0.04), zb = Math.min(0, seaZ) - T0;   // slab bottom
+  const cs = []; [[-R, -R], [R, -R], [R, R], [-R, R]].forEach(([x, y]) => { cs.push(proj(x, y, zb)); cs.push(proj(x, y, topZ)); });
+  const xs = cs.map(c => c[0]), ys = cs.map(c => c[1]);
+  const S = Math.min((MAPW - 110) / (Math.max(...xs) - Math.min(...xs)), (H - 170) / (Math.max(...ys) - Math.min(...ys)));
+  const OX = 40 + (MAPW - 40) / 2 - (Math.min(...xs) + Math.max(...xs)) / 2 * S, OY = 60 + (H - 60) / 2 - (Math.min(...ys) + Math.max(...ys)) / 2 * S;
+  const T = (x, y, z = 0) => { const [u, v] = proj(x, y, z); return [OX + u * S, OY + v * S]; };
+  const pt = p => p[0].toFixed(1) + ',' + p[1].toFixed(1);
+  const ringZ = (rg, z) => 'M' + rg.map(p => pt(T(p[0], p[1], z))).join('L') + 'Z';
+  const ringG = (rg, closed = true, zf = gz) => 'M' + rg.map(p => pt(T(p[0], p[1], zf(p[0], p[1])))).join('L') + (closed ? 'Z' : '');
+  // Flat ground: plan metres through one affine transform, so strokes in metres foreshorten correctly.
+  const mtx = `matrix(${(S * r[0]).toFixed(5)} ${(-S * KY * f[0]).toFixed(5)} ${(S * r[1]).toFixed(5)} ${(-S * KY * f[1]).toFixed(5)} ${OX.toFixed(2)} ${OY.toFixed(2)})`;
+  const pr = rg => 'M' + rg.map(p => p[0].toFixed(1) + ' ' + p[1].toFixed(1)).join('L') + 'Z';
+  const polys = list => list.map(p => pr(p.outer) + (p.holes || []).map(pr).join('')).join('');
+  const step = hasT ? D.terr.step / 2 : 1e9;
+  const drape = (list, zf = gz) => list.map(p => [p.outer, ...(p.holes || [])].map(rg => { const c = clipSq(rg.length > 1 && rg[0][0] === rg[rg.length - 1][0] && rg[0][1] === rg[rg.length - 1][1] ? rg.slice(0, -1) : rg, R); return c.length > 2 ? ringG(densify(c, step, true), true, zf) : ''; }).join('')).join('');
+
+  let o = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" font-family="Inter, Helvetica, Arial, sans-serif">`;
+  o += `<defs><linearGradient id="${P_}bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${C.bg[0]}"/><stop offset="1" stop-color="${C.bg[1]}"/></linearGradient>`
+    + `<pattern id="${P_}waves" width="14" height="7" patternUnits="userSpaceOnUse"><path d="M0 4.5 Q3.5 2 7 4.5 T14 4.5" fill="none" stroke="${C.waves}" stroke-opacity="${style === 'ink' ? .6 : .4}" stroke-width=".5"/></pattern>`
+    + `<pattern id="${P_}wavesS" width="${(14 * S * .6).toFixed(1)}" height="${(7 * S * .5).toFixed(1)}" patternUnits="userSpaceOnUse"><path d="M0 ${(4.5 * S * .5).toFixed(1)} Q${(3.5 * S * .6).toFixed(1)} ${(2 * S * .5).toFixed(1)} ${(7 * S * .6).toFixed(1)} ${(4.5 * S * .5).toFixed(1)} T${(14 * S * .6).toFixed(1)} ${(4.5 * S * .5).toFixed(1)}" fill="none" stroke="${C.waves}" stroke-opacity="${style === 'ink' ? .6 : .4}" stroke-width="${(.5 * S * .5).toFixed(2)}"/></pattern>`
+    + `<pattern id="${P_}dots" width="5" height="5" patternUnits="userSpaceOnUse"><circle cx="1.2" cy="1.2" r=".45" fill="#111"/><circle cx="3.7" cy="3.7" r=".45" fill="#111"/></pattern>`
+    + `<clipPath id="${P_}fr"><rect x="${-R}" y="${-R}" width="${2 * R}" height="${2 * R}"/></clipPath>`
+    + `<filter id="${P_}soft" x="-5%" y="-5%" width="110%" height="110%"><feGaussianBlur stdDeviation="${hasT ? 1.2 : (1.2 / S).toFixed(2)}"/></filter></defs>`;
+  o += `<rect width="${W}" height="${H}" fill="url(#${P_}bg)"/>`;
+
+  // Slab: the sides that face the viewer, their top edge following the ground.
+  const edges = [[[-R, -R], [R, -R]], [[R, -R], [R, R]], [[R, R], [-R, R]], [[-R, R], [-R, -R]]];
+  edges.forEach(([a, b]) => {
+    const n = [b[1] - a[1], -(b[0] - a[0])], L0 = Math.hypot(...n), d = (n[0] * f[0] + n[1] * f[1]) / L0;
+    if (d >= 0) return;
+    const lit = Math.max(0, (n[0] * sunV[0] + n[1] * sunV[1]) / L0), top = densify([a, b], hasT ? step : 1e9, false);
+    const zt = (x, y) => { const z = gz(x, y); return D.sea.length && hasT && z < seaZ + 0.5 ? seaZ : z; };
+    o += `<path d="M${top.map(p => pt(T(p[0], p[1], zt(p[0], p[1])))).join('L')}L${pt(T(b[0], b[1], zb))}L${pt(T(a[0], a[1], zb))}Z" fill="${mix(C.base2, C.base, lit)}" stroke="${C.line}" stroke-width=".6" stroke-linejoin="round"/>`;
+  });
+  const car = D.roads.filter(x => !x.ped).sort((a, b) => a.w - b.w), ped = D.roads.filter(x => x.ped);
+  if (!hasT) {
+    let g = `<rect x="${-R}" y="${-R}" width="${2 * R}" height="${2 * R}" fill="${C.land}"/>`;
+    if (D.sea.length) g += `<path d="${polys(D.sea)}" fill="${C.sea}" fill-rule="evenodd"/><path d="${polys(D.sea)}" fill="url(#${P_}waves)" fill-rule="evenodd"/>`;
+    if (D.water.length) g += `<path d="${polys(D.water)}" fill="${C.sea}" fill-rule="evenodd"/>`;
+    [['school', C.school], ['park', C.park], ['plaza', C.plaza], ['heritage', mix(C.plaza, C.lmRoof, .25)]].forEach(([k, c]) => { if (D[k].length) g += `<path d="${polys(D[k])}" fill="${c}" fill-rule="evenodd"/>`; });
+    if (D.green.length) {
+      g += `<path d="${polys(D.green.filter(x => !x.wood && !x.cem))}" fill="${C.green}" fill-rule="evenodd"/><path d="${polys(D.green.filter(x => x.wood))}" fill="${C.wood}" fill-rule="evenodd"/><path d="${polys(D.green.filter(x => x.cem))}" fill="${C.cem}" fill-rule="evenodd"/>`;
+      if (C.greenDots) g += `<path d="${polys(D.green)}" fill="url(#${P_}dots)" fill-rule="evenodd" opacity=".5"/>`;
+    }
+    if (D.sea.length) g += `<path d="${D.sea.map(s => pr(s.outer)).join('')}" fill="none" stroke="${C.coastLine}" stroke-width="1.1" vector-effect="non-scaling-stroke"/>`;
+    const line = l => 'M' + l.map(p => p[0].toFixed(1) + ' ' + p[1].toFixed(1)).join('L');
+    const strokes = (list, col, extra) => list.map(x => `<path d="${line(x.line)}" fill="none" stroke="${col}" stroke-width="${(x.w + extra).toFixed(1)}" stroke-linecap="round" stroke-linejoin="round"/>`).join('');
+    g += strokes(ped, C.roadedge, 0.8) + strokes(ped, C.ped, 0) + strokes(car, C.roadedge, 1.8) + strokes(car, C.road, 0);
+    if (showSh) {
+      let sh = '';
+      D.blds.forEach(b => {
+        const dx = sd[0] * b.h, dy = sd[1] * b.h, rg = b.outer;
+        sh += pr(rg.map(p => [p[0] + dx, p[1] + dy]));
+        rg.forEach((p, i) => { const q = rg[(i + 1) % rg.length]; sh += `M${p[0].toFixed(1)} ${p[1].toFixed(1)}L${q[0].toFixed(1)} ${q[1].toFixed(1)}L${(q[0] + dx).toFixed(1)} ${(q[1] + dy).toFixed(1)}L${(p[0] + dx).toFixed(1)} ${(p[1] + dy).toFixed(1)}Z`; });
+      });
+      g += `<g opacity="${style === 'ink' ? .16 : .22}" filter="url(#${P_}soft)"><path d="${sh}" fill="${C.shadow}" fill-rule="nonzero"/></g>`;
+    }
+    o += `<g transform="${mtx}"><g clip-path="url(#${P_}fr)">${g}</g></g>`;
+  } else {
+    // Terrain: grid cells far to near, lit like a hillshade; then everything on the ground draped over it.
+    const Tg = D.terr, n = Tg.n, P3 = (i, j) => { const x = -R + i * Tg.step, y = -R + j * Tg.step; return [x, y, gz(x, y)]; };
+    const L = [sunV[0] * Math.cos(sunAlt * rad), sunV[1] * Math.cos(sunAlt * rad), Math.sin(sunAlt * rad)], cells = [];
+    for (let j = 0; j < n - 1; j++) for (let i = 0; i < n - 1; i++) {
+      const a = P3(i, j), b = P3(i + 1, j), c = P3(i + 1, j + 1), d = P3(i, j + 1);
+      const ux = b[0] - a[0], uz = (b[2] - a[2] + c[2] - d[2]) / 2, vy = d[1] - a[1], vz = (d[2] - a[2] + c[2] - b[2]) / 2;
+      const nr = [-uz * vy, -ux * vz, ux * vy], nl = Math.hypot(...nr), lit = (nr[0] * L[0] + nr[1] * L[1] + nr[2] * L[2]) / nl;
+      cells.push([depth((a[0] + c[0]) / 2, (a[1] + c[1]) / 2), [a, b, c, d], Math.max(0, Math.min(1, (lit - 0.35) / 0.65))]);
+    }
+    cells.sort((p, q) => q[0] - p[0]);
+    cells.forEach(([, q, t]) => { const col = mix(mix(C.land, C.base2, 0.55), C.land, t); o += `<path d="M${q.map(p => pt(T(...p))).join('L')}Z" fill="${col}" stroke="${col}" stroke-width=".7" stroke-linejoin="round"/>`; });
+    if (D.sea.length) { const d = drape(D.sea, () => seaZ); o += `<path d="${d}" fill="${C.sea}" fill-rule="evenodd" stroke="${C.coastLine}" stroke-width="1.1"/><path d="${d}" fill="url(#${P_}wavesS)" fill-rule="evenodd"/>`; }
+    if (D.water.length) o += `<path d="${drape(D.water)}" fill="${C.sea}" fill-rule="evenodd"/>`;
+    [['school', C.school], ['park', C.park], ['plaza', C.plaza], ['heritage', mix(C.plaza, C.lmRoof, .25)]].forEach(([k, c]) => { if (D[k].length) o += `<path d="${drape(D[k])}" fill="${c}" fill-rule="evenodd"/>`; });
+    if (D.green.length) {
+      o += `<path d="${drape(D.green.filter(x => !x.wood && !x.cem))}" fill="${C.green}" fill-rule="evenodd"/><path d="${drape(D.green.filter(x => x.wood))}" fill="${C.wood}" fill-rule="evenodd"/><path d="${drape(D.green.filter(x => x.cem))}" fill="${C.cem}" fill-rule="evenodd"/>`;
+      if (C.greenDots) o += `<path d="${drape(D.green)}" fill="url(#${P_}dots)" fill-rule="evenodd" opacity=".5"/>`;
+    }
+    const strokes = (list, col, extra) => list.map(x => clipLine(x.line, R).map(l => `<path d="${ringG(densify(l, step, false), false)}" fill="none" stroke="${col}" stroke-width="${((x.w + extra) * S * 0.64).toFixed(1)}" stroke-linecap="round" stroke-linejoin="round"/>`).join('')).join('');
+    o += strokes(ped, C.roadedge, 0.8) + strokes(ped, C.ped, 0) + strokes(car, C.roadedge, 1.8) + strokes(car, C.road, 0);
+    if (showSh) {
+      let sh = '';
+      D.blds.forEach(b => {
+        const dx = sd[0] * b.h, dy = sd[1] * b.h, rg = b.outer, parts = [rg.map(p => [p[0] + dx, p[1] + dy])];
+        rg.forEach((p, i) => { const q = rg[(i + 1) % rg.length]; parts.push([p, q, [q[0] + dx, q[1] + dy], [p[0] + dx, p[1] + dy]]); });
+        parts.forEach(pp => { const c = clipSq(pp, R); if (c.length > 2) sh += ringG(c); });
+      });
+      o += `<g opacity="${style === 'ink' ? .16 : .22}" filter="url(#${P_}soft)"><path d="${sh}" fill="${C.shadow}" fill-rule="nonzero"/></g>`;
+    }
+  }
+
+  // Buildings and trees, far to near.
+  const items = D.blds.map(b => [depth(b.c[0], b.c[1]), 0, b]);
+  if (showTr) D.trees.forEach(p => items.push([depth(p[0], p[1]), 1, p]));
+  D.spires.forEach(sp => items.push([depth(sp.p[0], sp.p[1]) - 0.01, 2, sp]));   // just in front of the building they stand on
+  items.sort((a, b) => b[0] - a[0]);
+  const shade = (nx, ny, lm) => { const l = Math.max(0, nx * sunV[0] + ny * sunV[1]); return mix(lm ? C.lmDark : C.wallDark, lm ? C.lmLit : C.wallLit, Math.min(1, l * 1.25)); };
+  const lw = Math.max(0.3, Math.min(0.6, S * 0.45));
+  const treeR = 3.4 * S, trunkH = 6.5, showFl = $('optFloors').checked;
+  // A hemisphere (dome) of radius rr and height hh on the roof at z.
+  const dome = (x, y, z, rr, hh, lm) => {
+    const [cx, cy] = T(x, y, z), rx = rr * S, ryB = rr * S * KY, ryT = hh * KZ * S;
+    const fill = lm ? C.lmRoof : C.roof, side = lm ? C.lmLit : C.wallLit;
+    return `<path d="M${(cx - rx).toFixed(1)},${cy.toFixed(1)}A${rx.toFixed(1)},${ryT.toFixed(1)} 0 0 1 ${(cx + rx).toFixed(1)},${cy.toFixed(1)}A${rx.toFixed(1)},${ryB.toFixed(1)} 0 0 1 ${(cx - rx).toFixed(1)},${cy.toFixed(1)}Z" fill="${side}" stroke="${C.line}" stroke-width="${(lw * 1.1).toFixed(2)}"/>`
+      + `<path d="M${(cx - rx * .55).toFixed(1)},${(cy - ryT * .55).toFixed(1)}A${(rx * .7).toFixed(1)},${(ryT * .7).toFixed(1)} 0 0 1 ${(cx + rx * .15).toFixed(1)},${(cy - ryT * .98).toFixed(1)}" fill="none" stroke="${fill}" stroke-width="${Math.max(1, rx * .18).toFixed(1)}" stroke-linecap="round" opacity=".8"/>`
+      + `<line x1="${cx.toFixed(1)}" y1="${(cy - ryT).toFixed(1)}" x2="${cx.toFixed(1)}" y2="${(cy - ryT - Math.max(2, rr * S * .35)).toFixed(1)}" stroke="${C.line}" stroke-width="${(lw * 1.2).toFixed(2)}"/>`;
+  };
+  // A minaret or tower: cylinder, balcony ring and a cone.
+  const spire = sp => {
+    const zb = (sp.on ? sp.on.z0 + sp.on.h : gz(sp.p[0], sp.p[1])), zt = (sp.on ? sp.on.z0 : gz(sp.p[0], sp.p[1])) + sp.h;
+    sp.geo = { zb, zt }; if (zt <= zb + 1) return '';
+    const [bx, by] = T(sp.p[0], sp.p[1], zb), [tx, ty] = T(sp.p[0], sp.p[1], zt), rx = sp.r * S, ry = rx * KY, lm = true;
+    const lit = lm ? C.lmLit : C.wallLit, dark = lm ? C.lmDark : C.wallDark, top = lm ? C.lmRoof : C.roof;
+    let s2 = `<path d="M${(bx - rx).toFixed(1)},${by.toFixed(1)}A${rx.toFixed(1)},${ry.toFixed(1)} 0 0 0 ${(bx + rx).toFixed(1)},${by.toFixed(1)}L${(tx + rx).toFixed(1)},${ty.toFixed(1)}L${(tx - rx).toFixed(1)},${ty.toFixed(1)}Z" fill="${lit}" stroke="${C.line}" stroke-width="${lw.toFixed(2)}"/>`
+      + `<path d="M${(bx + rx * .2).toFixed(1)},${(by + ry * .95).toFixed(1)}L${(tx + rx * .2).toFixed(1)},${(ty + ry * .95).toFixed(1)}" stroke="${dark}" stroke-width="${(rx * .9).toFixed(1)}" opacity=".35"/>`;
+    if (sp.minaret) { const [qx, qy] = T(sp.p[0], sp.p[1], zb + (zt - zb) * .78); s2 += `<ellipse cx="${qx.toFixed(1)}" cy="${qy.toFixed(1)}" rx="${(rx * 1.6).toFixed(1)}" ry="${(ry * 1.6).toFixed(1)}" fill="${top}" stroke="${C.line}" stroke-width="${lw.toFixed(2)}"/>`; }
+    const coneH = sp.cone, [ax, ay] = T(sp.p[0], sp.p[1], zt + coneH);
+    s2 += `<ellipse cx="${tx.toFixed(1)}" cy="${ty.toFixed(1)}" rx="${rx.toFixed(1)}" ry="${ry.toFixed(1)}" fill="${top}" stroke="${C.line}" stroke-width="${lw.toFixed(2)}"/>`
+      + `<path d="M${(tx - rx * 1.05).toFixed(1)},${ty.toFixed(1)}L${ax.toFixed(1)},${ay.toFixed(1)}L${(tx + rx * 1.05).toFixed(1)},${ty.toFixed(1)}Z" fill="${dark}" stroke="${C.line}" stroke-width="${lw.toFixed(2)}" stroke-linejoin="round"/>`;
+    return s2;
+  };
+  items.forEach(([, kind, it]) => {
+    if (kind === 1) {
+      const [x, y] = it, z = gz(x, y), a = T(x, y, z), b = T(x, y, z + trunkH);
+      o += `<line x1="${a[0].toFixed(1)}" y1="${a[1].toFixed(1)}" x2="${b[0].toFixed(1)}" y2="${b[1].toFixed(1)}" stroke="${C.trunk}" stroke-width="${Math.max(.5, S * .35).toFixed(2)}"/><circle cx="${b[0].toFixed(1)}" cy="${b[1].toFixed(1)}" r="${treeR.toFixed(1)}" fill="${C.tree}" stroke="${C.treeLine}" stroke-width=".5"/>`;
+      return;
+    }
+    if (kind === 2) { o += spire(it); return; }
+    const b = it, walls = [], z0 = b.z0 + b.m, top = b.z0 + b.h, dm = b.dome || b.mosque, rs = b.t['roof:shape'] || '';
+    const per = b.outer.reduce((s, p, i) => { const q = b.outer[(i + 1) % b.outer.length]; return s + Math.hypot(q[0] - p[0], q[1] - p[1]); }, 0);
+    const round = 4 * Math.PI * b.a / (per * per) > 0.85;   // a drum: the dome covers it
+    const rr = dm ? Math.sqrt(b.a / Math.PI) * (round ? 0.95 : b.mosque ? 0.55 : 0.92) : 0;
+    const domeH = b.dome ? Math.min(num(b.t['roof:height']) || Math.min(rr, (b.h - b.m) * 0.45), b.h - b.m - 1) : b.mosque ? rr * (round ? 1 : 0.9) : 0;
+    const pyr = !dm && !b.wall && /^(pyramidal|cone|conical)$/.test(rs);
+    const pyrH = pyr ? Math.max(0, Math.min(num(b.t['roof:height']) || Math.min(b.h * 0.3, Math.sqrt(b.a) * 0.5), b.h - b.m - 1)) : 0;
+    // A tagged height is the top of the roof; an estimated body height gets its dome on top.
+    const z1 = b.dome ? top - domeH : b.mosque && b.known ? Math.max(z0 + 3, top - domeH) : top - pyrH;
+    b.geo = { z0, z1, top, rr: dm ? rr : 0, domeH: dm ? domeH : 0, pyrH };   // reused by the 3D model export
+    let fl = '';
+    [b.outer, ...b.holes].forEach(rg => rg.forEach((p, i) => {
+      const q = rg[(i + 1) % rg.length]; let nx = q[1] - p[1], ny = -(q[0] - p[0]); const L0 = Math.hypot(nx, ny) || 1; nx /= L0; ny /= L0;
+      if (nx * f[0] + ny * f[1] >= 0) return;
+      walls.push([-(depth(p[0], p[1]) + depth(q[0], q[1])), `M${pt(T(p[0], p[1], z0))}L${pt(T(q[0], q[1], z0))}L${pt(T(q[0], q[1], z1))}L${pt(T(p[0], p[1], z1))}Z`, shade(nx, ny, b.lm)]);
+      // Floor lines every 3.2 m on walls long enough to show them.
+      if (showFl && !b.wall && !b.lm && Math.hypot(q[0] - p[0], q[1] - p[1]) * S > 5) for (let zz = z0 + 3.2; zz < z1 - 1; zz += 3.2) fl += `M${pt(T(p[0], p[1], zz))}L${pt(T(q[0], q[1], zz))}`;
+    }));
+    walls.sort((a, c) => a[0] - c[0]);
+    // A round drum: facets without lines, then one outline around the visible wall.
+    walls.forEach(([, d, c]) => o += round && b.outer.length > 8 ? `<path d="${d}" fill="${c}" stroke="${c}" stroke-width=".6"/>` : `<path d="${d}" fill="${c}" stroke="${C.line}" stroke-width="${lw.toFixed(2)}" stroke-linejoin="round"/>`);
+    if (round && b.outer.length > 8 && walls.length) {
+      const vis = b.outer.map((p, i) => [p, b.outer[(i + 1) % b.outer.length]]).filter(([p, q]) => (q[1] - p[1]) * f[0] - (q[0] - p[0]) * f[1] < 0);
+      const L = vis.flatMap(([p, q]) => [p, q]).sort((u, v) => T(u[0], u[1], z0)[0] - T(v[0], v[1], z0)[0]), a0 = L[0], a1 = L[L.length - 1];
+      o += `<path d="M${pt(T(a0[0], a0[1], z1))}L${pt(T(a0[0], a0[1], z0))}M${pt(T(a1[0], a1[1], z1))}L${pt(T(a1[0], a1[1], z0))}" stroke="${C.line}" stroke-width="${lw.toFixed(2)}"/>`;
+      o += `<path d="M${vis.map(([p, q]) => pt(T(p[0], p[1], z0)) + 'L' + pt(T(q[0], q[1], z0))).join('M')}" fill="none" stroke="${C.line}" stroke-width="${lw.toFixed(2)}"/>`;
+    }
+    if (fl) o += `<path d="${fl}" fill="none" stroke="${C.line}" stroke-opacity=".28" stroke-width="${(lw * .7).toFixed(2)}"/>`;
+    if (pyrH * S > 1) {   // pyramidal or cone roof: faces to the apex, far to near
+      const ap = T(b.c[0], b.c[1], top);
+      b.outer.map((p, i) => { const q = b.outer[(i + 1) % b.outer.length]; let nx = q[1] - p[1], ny = -(q[0] - p[0]); const L0 = Math.hypot(nx, ny) || 1;
+        return [-(depth(p[0], p[1]) + depth(q[0], q[1])), `M${pt(T(p[0], p[1], z1))}L${pt(T(q[0], q[1], z1))}L${pt(ap)}Z`, shade(nx / L0, ny / L0, b.lm)]; })
+        .sort((a, c) => a[0] - c[0]).forEach(([, d, c]) => o += `<path d="${d}" fill="${c}" stroke="${C.line}" stroke-width="${lw.toFixed(2)}" stroke-linejoin="round"/>`);
+    } else o += `<path d="${ringZ(b.outer, z1)}${b.holes.map(h => ringZ(h, z1)).join('')}" fill="${b.lm ? C.lmRoof : C.roof}" fill-rule="evenodd" stroke="${C.line}" stroke-width="${(lw * 1.2).toFixed(2)}" stroke-linejoin="round"/>`;
+    // Crenellations on walls, keeps and defensive towers: small blocks along the roof edge, far edges first.
+    const fort = b.wall ? b.a > 6 : !pyr && !dm && (b.t.historic === 'castle' || b.t.building === 'castle' || b.t['tower:type'] === 'defensive' || /^(fort|fortress|citywalls|tower)$/.test(b.t.historic || ''));
+    if (fort) {
+      const eds = (b.wall ? [[b.outer[0], b.outer[1]]] : b.outer.map((p, i) => [p, b.outer[(i + 1) % b.outer.length]]))
+        .sort((u, v) => (depth(v[0][0], v[0][1]) + depth(v[1][0], v[1][1])) - (depth(u[0][0], u[0][1]) + depth(u[1][0], u[1][1])));
+      let cr = '';
+      eds.forEach(([P0, P1]) => { const L0 = Math.hypot(P1[0] - P0[0], P1[1] - P0[1]); if (L0 * S < 6) return;
+        for (let d = 0.6; d < L0 - 0.6; d += 2.4) { const t0 = d / L0, t1 = Math.min(1, (d + 1.2) / L0), A = [P0[0] + (P1[0] - P0[0]) * t0, P0[1] + (P1[1] - P0[1]) * t0], B = [P0[0] + (P1[0] - P0[0]) * t1, P0[1] + (P1[1] - P0[1]) * t1];
+          cr += `M${pt(T(A[0], A[1], z1))}L${pt(T(B[0], B[1], z1))}L${pt(T(B[0], B[1], z1 + 1))}L${pt(T(A[0], A[1], z1 + 1))}Z`; } });
+      if (cr) o += `<path d="${cr}" fill="${C.lmLit}" stroke="${C.line}" stroke-width="${(lw * .7).toFixed(2)}"/>`;
+    }
+    if (dm && rr * S > 2) o += dome(b.c[0], b.c[1], z1, rr, domeH, b.lm);
+  });
+
+  // Labels: a pill on a leader line; staggered when two would collide.
+  if (showLb) {
+    const placed = [];
+    D.labels.filter(l => !hidden.has(l.name)).map(l => ({ ...l, z: l.b ? l.b.z0 + l.b.h : gz(l.p[0], l.p[1]) })).sort((a, b) => depth(b.p[0], b.p[1]) - depth(a.p[0], a.p[1])).forEach(l => {
+      const [X, Y] = T(l.p[0], l.p[1], l.z), wd = l.name.length * 7.1 + 18;
+      let ly = Y - (l.b ? 46 : 30);
+      for (let k = 0; k < 6; k++) { const hit = placed.find(([px, py, pw]) => Math.abs(px - X) < (pw + wd) / 2 + 6 && Math.abs(py - ly) < 22); if (!hit) break; ly = hit[1] - 24; }
+      placed.push([X, ly, wd]);
+      o += `<g data-label="${esc(l.name)}" style="cursor:pointer"><line x1="${X.toFixed(1)}" y1="${Y.toFixed(1)}" x2="${X.toFixed(1)}" y2="${(ly + 9).toFixed(1)}" stroke="${C.ink}" stroke-width=".9"/><circle cx="${X.toFixed(1)}" cy="${Y.toFixed(1)}" r="2.4" fill="${C.ink}"/>`
+        + `<rect x="${(X - wd / 2).toFixed(1)}" y="${(ly - 10).toFixed(1)}" width="${wd.toFixed(1)}" height="20" rx="10" fill="#ffffff" fill-opacity=".94" stroke="${C.ink}" stroke-width=".8"/>`
+        + `<text x="${X.toFixed(1)}" y="${(ly + 4.2).toFixed(1)}" font-size="12" font-weight="600" fill="${C.ink}" text-anchor="middle">${esc(l.name)}</text></g>`;
+    });
+  }
+
+  // Side panel.
+  const PX = MAPW + 20, title = $('title').value.trim() || D.o.name || 'Site', sub = $('sub').value.trim();
+  o += `<line x1="${MAPW}" y1="50" x2="${MAPW}" y2="${H - 50}" stroke="#d8d2c6"/>`;
+  o += `<text x="${PX}" y="92" font-size="13" letter-spacing="3" fill="${C.mute}">ISOMETRIC SITE MAP</text>`;
+  o += `<text x="${PX}" y="134" font-size="${title.length > 14 ? 28 : 38}" font-weight="700" fill="${C.ink}">${esc(title.length > 24 ? title.slice(0, 23) + '…' : title)}</text>`;
+  let yy = 134;
+  if (sub) { yy += 30; o += `<text x="${PX}" y="${yy}" font-size="18" fill="${C.ink}">${esc(sub.length > 34 ? sub.slice(0, 33) + '…' : sub)}</text>`; }
+  yy += 26; o += `<text x="${PX}" y="${yy}" font-size="13" fill="${C.mute}">${D.o.lat.toFixed(4)}° N, ${D.o.lng.toFixed(4)}° E</text>`;
+  yy += 50; o += `<text x="${PX}" y="${yy}" font-size="12" letter-spacing="2" font-weight="700" fill="${C.ink}">LEGEND</text>`;
+  const leg = [['Building', C.roof, C.wallDark]];
+  if (D.blds.some(b => b.lm)) leg.push(['Landmark', C.lmRoof, C.lmDark]);
+  if (D.roads.some(x => !x.ped)) leg.push(['Street', C.road, C.roadedge]);
+  if (D.roads.some(x => x.ped)) leg.push(['Pedestrian street, path', C.ped, C.roadedge]);
+  if (D.plaza.length) leg.push(['Square', C.plaza, C.plaza]);
+  if (D.green.length) leg.push(['Park and green', C.green, C.treeLine]);
+  if (D.school.length) leg.push(['Schools, hospitals, sport', C.school, C.school]);
+  if (D.park.length) leg.push(['Parking', C.park, C.park]);
+  if (D.sea.length || D.water.length) leg.push([D.sea.length ? 'Sea' : 'Water', C.sea, C.sea2]);
+  leg.forEach(([t, c1, c2], i) => { const y = yy + 20 + i * 26; o += `<rect x="${PX}" y="${y}" width="26" height="16" rx="2" fill="${c1}" stroke="${c2}" stroke-width="1.2"/><text x="${PX + 38}" y="${y + 12.5}" font-size="13" fill="${C.ink}">${t}</text>`; });
+  yy += 20 + leg.length * 26 + 34;
+  // North arrow: where north points on the drawing.
+  const n0 = T(0, 0), n1 = T(0, 60), ang = Math.atan2(n1[0] - n0[0], -(n1[1] - n0[1])) / rad, cx = PX + 32, cy = yy + 34;
+  o += `<g transform="translate(${cx},${cy}) rotate(${ang.toFixed(1)})"><circle r="28" fill="none" stroke="${C.ink}" stroke-width=".8"/><path d="M0,-24 L8,10 L0,4 L-8,10Z" fill="${C.ink}"/></g>`;
+  o += `<text x="${(cx + 40 * Math.sin(ang * rad)).toFixed(1)}" y="${(cy - 40 * Math.cos(ang * rad) + 4).toFixed(1)}" font-size="13" font-weight="700" text-anchor="middle" fill="${C.ink}">N</text>`;
+  // Scale bar: true along the screen horizontal (the r axis of the plan).
+  const bar = [500, 200, 100, 50, 20].find(v => v * S <= 150) || 20, Lb = bar * S, sx = PX + 90, rAz = Math.atan2(r[0], r[1]) / rad;
+  o += `<g transform="translate(${sx},${cy + 6})"><rect width="${(Lb / 2).toFixed(1)}" height="6" fill="${C.ink}"/><rect x="${(Lb / 2).toFixed(1)}" width="${(Lb / 2).toFixed(1)}" height="6" fill="#fff" stroke="${C.ink}"/>`
+    + `<text y="22" font-size="11" fill="${C.ink}">0</text><text x="${(Lb / 2).toFixed(1)}" y="22" font-size="11" text-anchor="middle" fill="${C.ink}">${bar / 2}</text><text x="${Lb.toFixed(1)}" y="22" font-size="11" text-anchor="middle" fill="${C.ink}">${bar} m</text>`
+    + `<text y="-10" font-size="11" fill="${C.mute}">Plan scale, along the ${dirName(rAz)} edge</text></g>`;
+  yy = cy + 80;
+  const bl = D.blds.filter(b => !b.wall), est = bl.filter(b => !b.known).length, pct = Math.round(100 * est / Math.max(1, bl.length));
+  const notes = [`Area: ${2 * R} × ${2 * R} m, seen from the ${dirName(view)}.`, showSh ? `Sun from the ${dirName(sunAz)} at ${sunAlt}°.` : '',
+    `${bl.length.toLocaleString('en-GB')} buildings. ${pct}% have no height in OSM;`,
+    mode === 'est' ? 'these are estimated from footprint size' : `these are drawn at ${mode} floors`, mode === 'est' ? '(1 to 6 floors of 3.2 m).' : '(3.2 m each).', '',
+    'Data © OpenStreetMap contributors (ODbL).', `Drawn with a_tools, ${new Date().toISOString().slice(0, 10)}.`].filter((x, i) => x !== '' || i === 5);
+  o += `<text x="${PX}" y="${yy}" font-size="12" letter-spacing="2" font-weight="700" fill="${C.ink}">NOTES</text>`;
+  notes.forEach((n, i) => o += `<text x="${PX}" y="${yy + 24 + i * 19}" font-size="12.5" fill="${i >= notes.length - 2 ? C.mute : C.ink}">${esc(n)}</text>`);
+  o += `<text x="${PX}" y="${H - 52}" font-size="12" fill="${C.mute}">jerkovjerkinov.github.io/a_tools</text>`;
+  return o + '</svg>';
+}
+
+// ---------- Exports ----------
+const fileBase = () => `iso-${ATools.slug($('title').value.trim() || data.o.name || 'site')}-${2 * data.R}m-${style}`;
+$('svg').onclick = () => { ATools.download(fileBase() + '.svg', drawing(), 'image/svg+xml'); ATools.track && ATools.track('iso-map/svg'); };
+$('png').onclick = () => {
+  const svg = drawing(), img = new Image(), url = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml' }));
+  img.onload = () => {
+    const c = document.createElement('canvas'); c.width = W * 2.5; c.height = H * 2.5;   // 4200 × 2970 px, 254 dpi on A3
+    const ctx = c.getContext('2d'); ctx.drawImage(img, 0, 0, c.width, c.height); URL.revokeObjectURL(url);
+    c.toBlob(b => { const a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = fileBase() + '.png'; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000); }, 'image/png');
+  };
+  img.onerror = () => { URL.revokeObjectURL(url); alert('This browser could not make the PNG. Use the SVG or the PDF.'); };
+  img.src = url; ATools.track && ATools.track('iso-map/png');
+};
+// 3D model: rebuilds the drawing first, so heights, terrain and roof shapes match what is on screen.
+function model3d() {
+  drawing();
+  const D = data, R = D.R, ex = +$('terr').value, gz = groundFn(D, ex) || (() => 0), M = ATModel;
+  const parts = [], lines = [], points = [];
+  const gm = M.ground(gz, R, Math.min(80, Math.max(24, Math.round(2 * R / 12))), Math.max(10, R * 0.04));
+  parts.push({ name: 'ground', layer: 'Ground', tris: gm.top }, { name: 'base', layer: 'Base', tris: gm.base });
+  D.blds.forEach((b, i) => { if (b.geo) parts.push({ name: (b.wall ? 'wall_' : b.lm ? 'landmark_' : 'building_') + (i + 1), layer: b.wall ? 'Walls' : b.lm ? 'Landmarks' : 'Buildings', tris: M.building(b, b.geo) }); });
+  D.spires.forEach((sp, i) => { if (sp.geo && sp.geo.zt > sp.geo.zb + 1) parts.push({ name: (sp.minaret ? 'minaret_' : 'tower_') + (i + 1), layer: 'Landmarks', tris: M.spire(sp.p, sp.r, sp.geo.zb, sp.geo.zt, sp.cone) }); });
+  const drape = (l, closed) => densify(l, 4, closed).map(([x, y]) => [x, y, gz(x, y) + 0.05]);
+  const inSq = l => l.filter(([x, y]) => Math.abs(x) <= R && Math.abs(y) <= R);
+  D.roads.forEach(r => clipLine(r.line, R).forEach(l => lines.push({ layer: r.ped ? 'Paths' : 'Streets', pts: drape(l, false) })));
+  [['Green', D.green], ['Water', D.water], ['Squares', D.plaza], ['Heritage', D.heritage]].forEach(([layer, list]) => list.forEach(p => { const l = inSq(p.outer || []); if (l.length > 2) lines.push({ layer, pts: drape(l, true), closed: true }); }));
+  D.coast.forEach(c => clipLine(c, R).forEach(l => lines.push({ layer: 'Coastline', pts: drape(l, false) })));
+  D.trees.forEach(([x, y]) => points.push({ layer: 'Trees', p: [x, y, gz(x, y)] }));
+  return { parts, lines, points, note: `a_tools isometric map model, metres, origin at ${D.o.lat.toFixed(6)}, ${D.o.lng.toFixed(6)}, north +Y. (c) OpenStreetMap contributors; terrain Copernicus DEM via Open-Meteo.` };
+}
+const modelBase = () => `iso-model-${ATools.slug($('title').value.trim() || data.o.name || 'site')}-${2 * data.R}m`;
+$('xObj').onclick = () => { ATools.download(modelBase() + '.obj', ATModel.obj(model3d()), 'text/plain'); ATools.track && ATools.track('iso-map/obj'); };
+$('xDxf').onclick = () => { ATools.download(modelBase() + '.dxf', ATModel.dxf(model3d()), 'application/dxf'); ATools.track && ATools.track('iso-map/dxf'); };
+$('xStl').onclick = () => { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([ATModel.stl(model3d())], { type: 'model/stl' })); a.download = modelBase() + '.stl'; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000); ATools.track && ATools.track('iso-map/stl'); };
+$('print').onclick = () => { $('printArea').innerHTML = drawing(); ATools.track && ATools.track('iso-map/print'); window.print(); };
+</script>
+</body>
+</html>
