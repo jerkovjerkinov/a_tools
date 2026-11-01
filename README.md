@@ -87,7 +87,8 @@ A 500 m to 5 km square around the site turned into a 3D model in the browser, fr
 
 - **Elevation**: [Mapterhorn](https://mapterhorn.com) terrain tiles (Terrarium-encoded WebP, best zoom found by probing; Copernicus GLO-30 in most of the world, finer national lidar where available), falling back to the AWS Terrain Tiles (Terrarium PNG). Sampled with bicubic interpolation onto a 201, 401 or 801 node grid.
 - **Roads, rail, water, land cover, mapped trees and buildings**: one Overpass query (with mirrors). Multipolygons are assembled from member ways; the sea comes from the coastline.
-- **Building heights**: OSM `height` / `building:levels`, else the GHSL built-height layer (as in the Isometric Map), else a default.
+- **More buildings, and a stand-in when Overpass is busy**: [Overture Maps](https://overturemaps.org) monthly PMTiles, read with range requests (`assets/lib/pmtiles.js`, `assets/lib/overture.js`; newest release found from the public bucket listing). Overture buildings include footprints traced from satellite imagery by Microsoft, Google and others; those whose middle is not inside an OSM building are added. When the OSM query for roads, water and land cover fails, Overture's transportation and base themes (roads, rail, rivers, streams, sea, land use, trees, ESA WorldCover land cover) take its place. The OSM data comes as two smaller queries (buildings, everything else) so one busy server does not lose both.
+- **Building heights**: OSM `height` / `building:levels` (or Overture's), else the GHSL built-height layer (as in the Isometric Map), else a default.
 - **Vegetation and imagery**: the least cloudy recent Sentinel-2 L2A scene (Element 84 Earth Search STAC, with an S3 listing fallback by MGRS tile), read straight from its cloud-optimised GeoTIFFs with range requests (`assets/lib/cog.js`: TIFF/BigTIFF, deflate, predictor 2). Red and near-infrared give NDVI; the scene classification masks cloud; the true-colour image drapes the Satellite style. Leaf-off winter scenes are avoided.
 - **Water history**: JRC Global Surface Water occurrence 1984–2021.
 
@@ -103,9 +104,9 @@ Downloads:
 - **GIS**: GeoTIFF elevation and slope (float32, EPSG:4326), GeoJSON of all layers, KML.
 - **Laser**: contour plates at the chosen scale, sheet thickness and height exaggeration (at most 150), packed onto sheets, each with a numbered label and a score line where the next plate sits; SVG or DXF.
 
-Libraries: `assets/lib/terrain.js` (DEM loading, shaping, contours, plates, analysis), `land.js` (OSM parsing, land cover raster, tree placement), `sentinel.js`, `cog.js`, `utm.js` (UTM and MGRS) and `export3d.js` (3dm, DXF, OBJ, GeoTIFF and laser writers).
+Libraries: `assets/lib/terrain.js` (DEM loading, shaping, contours, plates, analysis), `land.js` (OSM parsing, land cover raster, tree placement), `sentinel.js`, `cog.js`, `pmtiles.js` (PMTiles v3 and vector tile decoding), `overture.js`, `utm.js` (UTM and MGRS) and `export3d.js` (3dm, DXF, OBJ, GeoTIFF and laser writers).
 
-Data credits: Mapterhorn (see its attribution page; Copernicus DEM © DLR/Airbus, ESA), AWS Terrain Tiles (Mapzen, various sources), © OpenStreetMap contributors (ODbL), Copernicus Sentinel-2 data (modified), JRC Global Surface Water (Pekel et al. 2016, © EC JRC/Google), GHSL (EC JRC, CC BY 4.0).
+Data credits: Mapterhorn (see its attribution page; Copernicus DEM © DLR/Airbus, ESA), AWS Terrain Tiles (Mapzen, various sources), © OpenStreetMap contributors (ODbL), Overture Maps Foundation (ODbL / CDLA Permissive 2.0; includes Microsoft and Google building footprints), Copernicus Sentinel-2 data (modified), JRC Global Surface Water (Pekel et al. 2016, © EC JRC/Google), GHSL (EC JRC, CC BY 4.0).
 
 ### Programme & Adjacency
 

@@ -1,10 +1,10 @@
 // Unit checks for shared libraries (no browser). Run: node tests/unit.js
 const fs = require('fs'), vm = require('vm'), path = require('path');
 const root = path.join(__dirname, '..');
-const ctx = { window: {}, console, earcut: require('earcut'), Math, TextEncoder, Float32Array, Float64Array, Uint8Array, Uint16Array, Uint32Array, Int32Array, ArrayBuffer, DataView, Map, Set };
+const ctx = { window: {}, console, earcut: require('earcut'), Math, TextEncoder, Float32Array, Float64Array, Uint8Array, Uint16Array, Uint32Array, Int32Array, ArrayBuffer, DataView, Map, Set, TextDecoder };
 vm.createContext(ctx);
-['assets/lib/fabric.js', 'assets/lib/model.js', 'assets/lib/utm.js', 'assets/lib/terrain.js', 'assets/lib/land.js', 'assets/lib/export3d.js'].forEach(f => vm.runInContext(fs.readFileSync(path.join(root, f), 'utf8'), ctx, { filename: f }));
-const { ATFabric: F, ATModel: M, ATUtm: U, ATTerrain: TR, ATLand: LD, ATExport: EX } = ctx.window;
+['assets/lib/fabric.js', 'assets/lib/model.js', 'assets/lib/utm.js', 'assets/lib/terrain.js', 'assets/lib/land.js', 'assets/lib/export3d.js', 'assets/lib/pmtiles.js', 'assets/lib/overture.js'].forEach(f => vm.runInContext(fs.readFileSync(path.join(root, f), 'utf8'), ctx, { filename: f }));
+const { ATFabric: F, ATModel: M, ATUtm: U, ATTerrain: TR, ATLand: LD, ATExport: EX, ATPmtiles: PM, ATOverture: OV } = ctx.window;
 let fails = 0; const ok = (c, msg) => { console.log((c ? 'ok   ' : 'FAIL ') + msg); if (!c) fails++; };
 const near = (a, b, e) => Math.abs(a - b) <= e;
 
@@ -109,5 +109,24 @@ ok(counts.length >= 2 && counts.every(c => c <= 32767) && /INSERT\n8\nVegetation
 // Laser sheets: every piece lands inside a sheet.
 const sh = EX.pack([...Array(9)].map((_, k) => ({ outer: [[0, 0], [150, 0], [150, 100], [0, 100]], holes: [], label: String(k) })), 400, 300);
 ok(sh.length === 3 && sh.every(s => s.items.every(it => it.p.outer.every(([x, y]) => x + it.dx >= 0 && x + it.dx <= 400 && y + it.dy >= 0 && y + it.dy <= 300))), `laser pieces packed on ${sh.length} sheets inside the edges`);
+
+// ---------- Overture / PMTiles ----------
+ok(PM.tileId(0, 0, 0) === 0 && [[0, 0], [0, 1], [1, 1], [1, 0]].map(([x, y]) => PM.tileId(1, x, y)).join() === '1,2,3,4' && PM.tileId(2, 0, 0) === 5, 'PMTiles tile ids follow the Hilbert curve');
+// A hand-made vector tile: layer "building" with one square (keys/values) and layer "segment" with one line.
+const vint = v => { const o = []; while (v > 127) { o.push((v & 127) | 128); v = Math.floor(v / 128); } o.push(v); return o; };
+const zzE = v => (v << 1) ^ (v >> 31), fld = (f, w) => vint(f * 8 + w), lenD = (f, b) => [...fld(f, 2), ...vint(b.length), ...b], str = t => [...new TextEncoder().encode(t)];
+const feat = (type, geom, tags) => lenD(2, [...lenD(2, tags.flatMap(vint)), ...fld(3, 0), ...vint(type), ...lenD(4, geom.flatMap(vint))]);
+const sq = [9, zzE(1024), zzE(1024), 26, zzE(1024), 0, 0, zzE(1024), zzE(-1024), 0, 15];   // MoveTo, LineTo ×3, ClosePath: clockwise in tile space = exterior
+const ln = [9, zzE(0), zzE(2048), 10, zzE(4096), 0];
+const layer = (name, f, keys, vals) => lenD(3, [...fld(15, 0), 2, ...lenD(1, str(name)), ...f, ...keys.flatMap(k => lenD(3, str(k))), ...vals.flatMap(v => lenD(4, lenD(1, str(v)))), ...fld(5, 0), ...vint(4096)]);
+const mvt = Uint8Array.from([...layer('building', feat(3, sq, [0, 0]), ['class'], ['mosque']), ...layer('segment', feat(2, ln, [0, 0, 1, 1]), ['subtype', 'class'], ['road', 'primary'])]);
+const lay = PM.decode(mvt, 1, 1, 0), bf = lay.building && lay.building[0], sf = lay.segment && lay.segment[0];
+ok(bf && bf.type === 3 && bf.props.class === 'mosque' && bf.geom.length === 1 && near(bf.geom[0][0][0][0], 45, 1e-9) && OV.area(bf.geom[0][0]) < 0, 'vector tile: polygon decoded with its tags, exterior ring clockwise on the map');
+ok(sf && sf.type === 2 && sf.props.class === 'primary' && near(sf.geom[0][1][0], 180, 1e-9) && near(sf.geom[0][0][1], 66.5133, 1e-3), 'vector tile: line decoded to longitude / latitude');
+const b9 = { west: 0, east: 10, south: 0, north: 10 };
+const cr = OV.clipRing([[-5, 2], [5, 2], [5, 8], [-5, 8], [-5, 2]], b9);
+ok(cr.length === 5 && near(Math.abs(OV.area(cr)), 30, 1e-9), 'Overture pieces clipped to their own tile, so neighbours meet without overlap');
+const cl2 = OV.clipLine([[-5, 5], [5, 5], [5, 15], [8, 5], [15, 5]], b9);
+ok(cl2.length === 2 && near(cl2[0][0][0], 0, 1e-9) && near(cl2[1][cl2[1].length - 1][0], 10, 1e-9), `a line leaving and re-entering a tile splits into ${cl2.length} pieces`);
 
 console.log(fails ? `\n${fails} failed` : '\nall unit checks passed'); process.exit(fails ? 1 : 0);

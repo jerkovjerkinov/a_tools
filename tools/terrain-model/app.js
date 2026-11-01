@@ -44,7 +44,7 @@ seg('detail', v => { DETAIL = +v; });
 seg('dlTab', v => document.querySelectorAll('.dl').forEach(d => d.hidden = d.dataset.tab !== v));
 
 // ---------- Progress card ----------
-const STEPS = [['dem', 'Elevation'], ['osm', 'OpenStreetMap: roads, water, land cover'], ['ghsl', 'Building heights (GHSL)'], ['s2', 'Sentinel-2: image and vegetation'],
+const STEPS = [['dem', 'Elevation'], ['osm', 'OpenStreetMap: roads, water, land cover'], ['ovt', 'Overture Maps: buildings traced from imagery'], ['ghsl', 'Building heights (GHSL)'], ['s2', 'Sentinel-2: image and vegetation'],
   ['hist', 'Water history 1984–2021 (JRC)'], ['shape', 'Shaping the ground'], ['analyse', 'Slope, aspect and flow'], ['assemble', 'Assembling the 3D model']];
 let prog = {};
 function progress(title) {
@@ -93,7 +93,11 @@ async function build() {
   const dem = ATTerrain.load(o, half, { n, onStep: s => step('dem', 'run', s) }).then(T => { step('dem', 'ok', `${T.src.split(' (')[0]} · ${n}×${n}`); return T; }, e => { step('dem', 'fail', e.why || e.message); throw e; });
   const needOsm = want.b || want.r || want.w || want.t;
   if (needOsm) step('osm', 'run'); else step('osm', 'skip', 'off');
-  const osm = needOsm ? ATLand.load(o, half, { buildings: want.b }).then(j => { step('osm', 'ok', `${j.elements.length.toLocaleString('en-US')} features`); return j; }, e => { step('osm', 'fail', e.why || 'not reached'); return null; }) : Promise.resolve(null);
+  const osm = needOsm ? ATLand.load(o, half, { buildings: want.b }).then(j => { step('osm', j.failed.length ? 'fail' : 'ok', `${j.elements.length.toLocaleString('en-US')} features` + (j.failed.length ? ` · ${j.failed.join(', ')} not reached` : '')); return j; }, e => { step('osm', 'fail', e.why || 'not reached'); return null; }) : Promise.resolve(null);
+  // Overture Maps: buildings OpenStreetMap lacks (traced from satellite imagery), and roads, water and land cover when OpenStreetMap is not reached.
+  const themes = [want.b && 'buildings', want.r && 'transportation', (want.w || want.t) && 'base'].filter(Boolean);
+  if (themes.length) step('ovt', 'run'); else step('ovt', 'skip', 'off');
+  const ovt = themes.length ? ATOverture.load(o, half, { themes, onStep: s => step('ovt', 'run', s) }).then(r => { step('ovt', 'ok', `${r.release.slice(0, 10)} · ${(r.counts.buildings || 0).toLocaleString('en-US')} buildings`); return r; }, e => { step('ovt', 'fail', e.why || 'not reached'); return null; }) : Promise.resolve(null);
   if (want.b) step('ghsl', 'run'); else step('ghsl', 'skip', 'off');
   const ghsl = want.b ? ATGhsl.load(o, half).then(g => { step('ghsl', 'ok', g.cells ? `median ${g.median.toFixed(0)} m` : 'no built cells'); return g.cells ? g : null; }, () => { step('ghsl', 'fail', 'not reached'); return null; }) : Promise.resolve(null);
   if (want.s) step('s2', 'run'); else step('s2', 'skip', 'off');
@@ -103,12 +107,14 @@ async function build() {
 
   let T0;
   try { T0 = await dem; } catch (e) { $('status').textContent = 'Could not load the elevation. ' + (e.why || 'Try again in a minute.'); $('build').disabled = false; $('progress').hidden = true; if (!M) $('empty').hidden = false; return; }
-  const [j, G, S2, H] = await Promise.all([osm, ghsl, s2, hist]);
+  const [jo, OV, G, S2, H] = await Promise.all([osm, ovt, ghsl, s2, hist]);
+  const j = mergeSources(jo, OV, o, half);
   await tick();
 
   // Layers from OSM.
   step('shape', 'run');
   const lay = j ? ATLand.parse(j, o, half) : { roads: [], rails: [], waterways: [], water: [], coast: [], cover: [], trees: [], rows: [], sea: [] };
+  if (j && !lay.sea.length && j.sea.length) { const Lc = ATUtm.local(o), P = r => r.map(([lng, lat]) => Lc.xy(lat, lng)); lay.sea = j.sea.map(pg => ({ outer: P(pg.outer), holes: pg.holes.map(P) })); }
   if (!want.r) { lay.roads = []; lay.rails = []; }
   if (!want.w) { lay.water = []; lay.waterways = []; lay.sea = []; }
   if (!want.t) { lay.trees = []; lay.rows = []; }
@@ -141,19 +147,45 @@ async function build() {
   step('assemble', 'run');
   const cover = ATLand.raster(lay, buildings, half, 1024);
   const trees = want.t ? ATLand.trees(lay, cover, half, { s2: S2, max: SIZE >= 3000 ? 60000 : 45000 }) : [];
-  M = { site: o, half, T, T0, A, rep, lay, buildings, trees, cover, s2: S2, hist: H, ghsl: G, osmTime: j && j.osm3s ? j.osm3s.timestamp_osm_base : '', built: new Date() };
+  M = { site: o, half, T, T0, A, rep, lay, buildings, trees, cover, s2: S2, hist: H, ghsl: G, osmTime: j && j.osm3s ? j.osm3s.timestamp_osm_base : '', from: j ? j.from : {}, overture: OV ? OV.release : '', built: new Date() };
   M.interval = autoInterval(rep.relief);
   buildScene();
   step('assemble', 'ok', `${buildings.length.toLocaleString('en-US')} buildings · ${trees.length.toLocaleString('en-US')} trees`);
   report(); legend(); scaleOptions(true);
   document.querySelectorAll('[data-x]').forEach(b => b.disabled = false);
   $('build').disabled = false;
-  const miss = [j || !needOsm ? '' : 'OpenStreetMap', S2 || !want.s ? '' : 'Sentinel-2'].filter(Boolean);
-  $('status').textContent = `Model ready.` + (miss.length ? ` ${miss.join(' and ')} could not be loaded, so the model has less detail. Press "Build model" again to retry.` : '');
-  setTimeout(() => { $('progress').hidden = true; }, miss.length ? 2500 : 700);
+  const osmGone = needOsm && (!jo || jo.failed.length), miss = [j || !needOsm ? '' : 'OpenStreetMap and Overture', S2 || !want.s ? '' : 'Sentinel-2'].filter(Boolean);
+  $('status').textContent = `Model ready.` + (osmGone && OV ? ' OpenStreetMap did not answer, so roads, water and land cover come from Overture Maps.' : '') +
+    (miss.length ? ` ${miss.join(' and ')} could not be loaded, so the model has less detail. Press "Build model" again to retry.` : '');
+  setTimeout(() => { $('progress').hidden = true; }, miss.length || osmGone ? 2500 : 700);
   ATools.track('terrain-model/build/' + SIZE);
 }
 const tick = () => new Promise(r => setTimeout(r, 0));
+
+// OpenStreetMap first. Overture adds the buildings OSM does not have (a footprint whose middle is not inside an OSM
+// building), and stands in for roads, water and land cover when the OSM query for them failed.
+function mergeSources(jo, ov, o, half) {
+  if (!jo && !ov) return null;
+  const osmEls = jo ? jo.elements : [], restOk = jo && !jo.failed.includes('rest'), bldOk = jo && !jo.failed.includes('buildings');
+  const isB = e => e.tags && e.tags.building, ovEls = ov ? ov.elements : [];
+  const out = [...osmEls], from = { osmBuildings: osmEls.filter(isB).length, overtureBuildings: 0, overtureLayers: false };
+  // Grid of OSM building outlines (local metres) for the inside test.
+  const Lc = ATUtm.local(o), cell = 50, grid = new Map(), key = (x, y) => Math.floor(x / cell) + ',' + Math.floor(y / cell);
+  osmEls.filter(isB).forEach(e => (e.type === 'way' ? [e.geometry] : (e.members || []).filter(m => m.role !== 'inner').map(m => m.geometry)).forEach(g => {
+    if (!g || g.length < 4) return; const r = g.map(q => Lc.xy(q.lat, q.lon)), xs = r.map(p => p[0]), ys = r.map(p => p[1]);
+    for (let x = Math.floor(Math.min(...xs) / cell); x <= Math.floor(Math.max(...xs) / cell); x++) for (let y = Math.floor(Math.min(...ys) / cell); y <= Math.floor(Math.max(...ys) / cell); y++) { const k = x + ',' + y; if (!grid.has(k)) grid.set(k, []); grid.get(k).push(r); }
+  }));
+  ovEls.forEach(e => {
+    const t = e.tags || {};
+    if (t.building) {
+      const g = e.type === 'way' ? e.geometry : e.members[0].geometry, r = g.map(q => Lc.xy(q.lat, q.lon));
+      const c = ATTerrain.interiorPoint(r) || r[0];
+      if (bldOk && (grid.get(key(c[0], c[1])) || []).some(rr => ATLand.inside(c, rr))) return;
+      out.push(e); from.overtureBuildings++;
+    } else if (!restOk) { if (t['overture:cover'] && osmEls.length) return; out.push(e); from.overtureLayers = true; }
+  });
+  return { elements: out, osm3s: jo && jo.osm3s, sea: !restOk && ov ? ov.sea : [], from };
+}
 function autoInterval(relief) { for (const c of [0.5, 1, 2, 5, 10, 20, 25, 50, 100, 200]) if (relief / c <= 45) return c; return 250; }
 const contourInterval = () => { const v = $('cInt').value; return v === 'auto' ? M.interval : +v; };
 
@@ -515,7 +547,8 @@ function report() {
   const names = ['0–5% flat', '5–10% gentle', '10–15% moderate', '15–25% steep', '> 25% very steep'];
   $('slopeBars').innerHTML = r.classes.map((v, i) => `<span>${names[i]}</span><i style="width:${Math.max(1, v * 100)}%;opacity:${0.25 + i * 0.18}"></i><span>${Math.round(v * 100)}%</span>`).join('');
   const s2 = M.s2 ? `Sentinel-2 ${M.s2.date}. ` : '';
-  $('sources').textContent = `Elevation: ${M.T.src}. ${s2}OpenStreetMap ${M.osmTime ? 'as of ' + M.osmTime.slice(0, 10) : ''}. Unknown building heights from GHSL where built.`;
+  const ov = M.overture && (M.from.overtureBuildings || M.from.overtureLayers) ? ` Overture Maps ${M.overture.slice(0, 10)}: ${M.from.overtureBuildings.toLocaleString('en-US')} buildings traced from imagery or other sources${M.from.overtureLayers ? ', roads, water and land cover' : ''}.` : '';
+  $('sources').textContent = `Elevation: ${M.T.src}. ${s2}OpenStreetMap ${M.osmTime ? 'as of ' + M.osmTime.slice(0, 10) : ''}.${ov} Unknown building heights from GHSL where built.`;
 }
 
 // ---------- Export scene ----------
@@ -672,7 +705,7 @@ function geoJson() {
   M.buildings.forEach(b => F.push({ type: 'Feature', properties: { layer: 'building', height: +(b.z1 - b.z0).toFixed(1), base: +b.z0.toFixed(2), height_source: b.known ? 'osm' : b.est || 'default', name: (b.tags && b.tags.name) || '' }, geometry: { type: 'Polygon', coordinates: [b.outer, ...b.holes].map(ring) } }));
   M.trees.forEach(t => F.push({ type: 'Feature', properties: { layer: 'tree', kind: t.kind, height: +t.h.toFixed(1), crown: +(2 * t.r).toFixed(1), source: t.src }, geometry: { type: 'Point', coordinates: ll([t.x, t.y]) } }));
   M.A.streams.forEach(s => F.push({ type: 'Feature', properties: { layer: 'flowline', catchment_ha: +(s.area / 1e4).toFixed(1) }, geometry: { type: 'LineString', coordinates: s.pts.map(ll) } }));
-  return JSON.stringify({ type: 'FeatureCollection', name: base(), attribution: '© OpenStreetMap contributors (ODbL); elevation ' + M.T.src, features: F });
+  return JSON.stringify({ type: 'FeatureCollection', name: base(), attribution: '© OpenStreetMap contributors (ODbL)' + (M.overture ? '; Overture Maps Foundation' : '') + '; elevation ' + M.T.src, features: F });
 }
 function kml() {
   const Lc = ATUtm.local(M.site), h = M.half, c = [[-h, -h], [h, -h], [h, h], [-h, h], [-h, -h]].map(p => { const g = Lc.ll(p[0], p[1]); return `${g.lng.toFixed(7)},${g.lat.toFixed(7)},0`; }).join(' ');
@@ -761,7 +794,7 @@ function planSvg() {
   tb += `<g transform="translate(${tx + bw + 16} ${oy + 49})"><path d="M0 -6 L3 4 L0 2 L-3 4 Z" fill="#1b1b19"/><text y="9" font-size="3" text-anchor="middle" font-weight="600">N</text></g>`;
   const legendRows = [['Buildings', '#2b2a27'], ['Trees (mapped or placed by rule)', '#b8c4ad'], ['Water', st.water], ['Woods', st.cover.wood], ['Parks and grass', st.cover.park], ['Fields', st.cover.farmland]];
   legendRows.forEach(([t, c], i) => { tb += `<rect x="${tx}" y="${oy + 64 + i * 6}" width="6" height="4" fill="${c}" stroke="#8d877b" stroke-width="0.1"/>` + txt(oy + 67.2 + i * 6, t, 2.7).replace(`x="${tx}"`, `x="${tx + 9}"`); });
-  tb += txt(ph - 34, 'Data', 2.6, 600) + [`Elevation: ${M.T.src}`, '© OpenStreetMap contributors (ODbL)', 'Heights: OSM, else GHS-BUILT-H R2023A (EC JRC)', M.s2 ? `Vegetation: Copernicus Sentinel-2, ${M.s2.date}` : '', `Made with a_tools · ${date}`].filter(Boolean).map((t, i) => txt(ph - 29 + i * 4, t, 2.4, 400, '#4a4945')).join('');
+  tb += txt(ph - 34, 'Data', 2.6, 600) + [`Elevation: ${M.T.src}`, '© OpenStreetMap contributors (ODbL)', M.overture && M.from.overtureBuildings ? `Overture Maps ${M.overture.slice(0, 10)} (buildings incl. Microsoft ML footprints)` : '', 'Heights: OSM, else GHS-BUILT-H R2023A (EC JRC)', M.s2 ? `Vegetation: Copernicus Sentinel-2, ${M.s2.date}` : '', `Made with a_tools · ${date}`].filter(Boolean).map((t, i) => txt(ph - 29 + i * 4, t, 2.4, 400, '#4a4945')).join('');
   s += layerG('Title', tb);
   return s + '</svg>\n';
 }
