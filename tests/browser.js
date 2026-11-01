@@ -154,6 +154,7 @@ const runBtn = async (p, id = 'run') => { await p.click('#' + id); await p.waitF
     const p = await ctx.newPage(); p.errs = [];
     p.on('pageerror', e => p.errs.push(e.message));
     p.on('console', m => m.type() === 'error' && !/Failed to load resource|ERR_FAILED|status of 404/.test(m.text()) && p.errs.push(m.text()));
+    p.on('dialog', d => { p.errs.push('dialog: ' + d.message()); d.dismiss(); });
     const osm = F.osm();
     await p.route('**/*', r => {
       const u = r.request().url(), q = u.split('?')[0];
@@ -176,12 +177,16 @@ const runBtn = async (p, id = 'run') => { await p.click('#' + id); await p.waitF
     ok(/Model ready/.test(st) && tm && tm.n === 201 && tm.relief > 1, `Terrain Model builds from the fallback DEM tiles: ${st} ${JSON.stringify(tm)}`);
     ok(tm && tm.buildings > 20 && tm.roads > 0, `Terrain Model: buildings and roads from OSM (${tm && tm.buildings} buildings, ${tm && tm.roads} roads)`);
     const sizes = {};
-    for (const k of ['3dm', 'dxf', 'obj', 'stl', 'svg', 'tif', 'geojson', 'lsvg']) {
+    for (const k of ['lsvg', '3dm', 'dxf', 'obj', 'stl', 'svg', 'tif', 'tifhand', 'geojson', 'shp', 'kmz']) {
       try { const [dl] = await Promise.all([p.waitForEvent('download', { timeout: 60000 }), p.evaluate(x => document.querySelector(`[data-x="${x}"]`).click(), k)]); sizes[k] = fs.statSync(await dl.path()).size; } catch (e) { sizes[k] = 0; }
     }
+    const failedDl = Object.keys(sizes).filter(k => !sizes[k]); if (failedDl.length) console.log('  (no download event for: ' + failedDl.join(' ') + ')');
     const again = await Promise.all([p.waitForEvent('download', { timeout: 60000 }), p.evaluate(() => document.querySelector('[data-x="3dm"]').click())]).then(([d]) => d.path()).then(f => fs.statSync(f).size).catch(() => 0);
     ok(again === sizes['3dm'], `Terrain Model: a second .3dm export matches the first (${again} bytes; rhino3dm used to corrupt its heap on block definitions)`);
-    ok(Object.values(sizes).every(v => v > 500), `Terrain Model: every download is made (${Object.entries(sizes).map(([k, v]) => k + ' ' + (v / 1e3).toFixed(0) + ' kB').join(', ')})`);
+    ok(Object.values(sizes).every(v => v > 500), `Terrain Model: every download is made (${Object.entries(sizes).map(([k, v]) => k + ' ' + (v / 1e3).toFixed(0) + ' kB').join(', ')}) ${p.errs.join(' ')}`);
+    // Analysis maps: every one paints and has a legend; flood and catchments come from the flow analysis.
+    const maps = await p.evaluate(async () => { const out = {}; for (const k of ['tri', 'tpi', 'curv', 'flood', 'basins', 'slr', 'slope']) { const s = document.getElementById('mapOn'); s.value = k; s.dispatchEvent(new Event('change')); await new Promise(r => setTimeout(r, 120)); out[k] = document.getElementById('legend').children.length; } const A = TM.M.A; out.basinCount = A.basins.length; out.hand = A.hand.length === TM.M.T.z.length; return out; });
+    ok(['tri', 'tpi', 'curv', 'flood', 'basins', 'slr'].every(k => maps[k] >= 2) && maps.basinCount >= 1 && maps.hand, `Terrain Model: analysis maps draw with legends ${JSON.stringify(maps)}`);
     for (const v of ['axo', 'plan', 'section', 'persp']) await p.evaluate(x => document.querySelector(`#view button[data-v="${x}"]`).click(), v);
     for (const v of ['atlas', 'ink', 'sat', 'clay']) await p.evaluate(x => document.querySelector(`#style button[data-v="${x}"]`).click(), v);
     ok(!p.errs.length, `Terrain Model: views and styles switch without errors ${p.errs.length ? JSON.stringify(p.errs.slice(0, 2)) : ''}`);

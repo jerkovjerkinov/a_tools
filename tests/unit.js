@@ -3,8 +3,8 @@ const fs = require('fs'), vm = require('vm'), path = require('path');
 const root = path.join(__dirname, '..');
 const ctx = { window: {}, console, earcut: require('earcut'), Math, TextEncoder, Float32Array, Float64Array, Uint8Array, Uint16Array, Uint32Array, Int32Array, ArrayBuffer, DataView, Map, Set, TextDecoder };
 vm.createContext(ctx);
-['assets/lib/fabric.js', 'assets/lib/model.js', 'assets/lib/utm.js', 'assets/lib/terrain.js', 'assets/lib/land.js', 'assets/lib/export3d.js', 'assets/lib/pmtiles.js', 'assets/lib/overture.js'].forEach(f => vm.runInContext(fs.readFileSync(path.join(root, f), 'utf8'), ctx, { filename: f }));
-const { ATFabric: F, ATModel: M, ATUtm: U, ATTerrain: TR, ATLand: LD, ATExport: EX, ATPmtiles: PM, ATOverture: OV } = ctx.window;
+['assets/lib/fabric.js', 'assets/lib/model.js', 'assets/lib/utm.js', 'assets/lib/terrain.js', 'assets/lib/land.js', 'assets/lib/export3d.js', 'assets/lib/pmtiles.js', 'assets/lib/overture.js', 'assets/lib/gisfiles.js'].forEach(f => vm.runInContext(fs.readFileSync(path.join(root, f), 'utf8'), ctx, { filename: f }));
+const { ATFabric: F, ATModel: M, ATUtm: U, ATTerrain: TR, ATLand: LD, ATExport: EX, ATPmtiles: PM, ATOverture: OV, ATGis: GIS } = ctx.window;
 let fails = 0; const ok = (c, msg) => { console.log((c ? 'ok   ' : 'FAIL ') + msg); if (!c) fails++; };
 const near = (a, b, e) => Math.abs(a - b) <= e;
 
@@ -92,6 +92,33 @@ const A6 = TR.analyse(T6, { streamArea: 5e4 });
 const main = A6.streams.sort((a, b) => b.area - a.area)[0];
 ok(main && main.pts.every(([x]) => Math.abs(x) <= 30) && main.pts[main.pts.length - 1][1] > 300, 'flow line follows the valley floor downhill (north)');
 ok(near(A6.slope[40 * 81 + 40], Math.atan(0.05) * 180 / Math.PI, 0.1) && near(A6.aspect[40 * 81 + 40], 0, 1) && near(A6.aspect[40 * 81 + 50], 270, 15), 'slope and aspect: valley floor faces north, east side faces west');
+// Two valleys side by side (floors at x = ±200 m, ridges at 0 and the edges): two catchments, HAND zero on the floors
+// and rising up the sides, TPI and curvature read the floors as valleys and hollows, the ridge as a crest.
+const T10 = TR.stats({ n: 81, step: 10, half: 400, z: Float32Array.from({ length: 81 * 81 }, (_, k) => { const i = k % 81, j = Math.floor(k / 81), x = -400 + i * 10, y = -400 + j * 10; return 100 - 0.05 * y + 8 * Math.abs(Math.cos(x * Math.PI / 400)); }) });
+const A10 = TR.analyse(T10, { streamArea: 2e4, floodArea: 2e4 }), K = (i, j) => j * 81 + i;
+ok(A10.basins.length >= 2 && A10.basin[K(20, 40)] > 0 && A10.basin[K(60, 40)] > 0 && A10.basin[K(20, 40)] !== A10.basin[K(60, 40)], `two valleys, ${A10.basins.length} catchments (${A10.basins.map(b => Math.round(b.area / 1e4) + ' ha').join(', ')})`);
+ok(A10.hand[K(20, 40)] < 0.5 && A10.hand[K(30, 40)] > 3 && A10.hand[K(30, 40)] < A10.hand[K(38, 40)], `HAND: valley floor ${A10.hand[K(20, 40)].toFixed(2)} m, side ${A10.hand[K(30, 40)].toFixed(1)} m, near the ridge ${A10.hand[K(38, 40)].toFixed(1)} m`);
+ok(A10.tpi[K(20, 40)] < -A10.tpiSd && A10.tpi[K(40, 40)] > 0 && A10.curv[K(20, 40)] > 0 && A10.curv[K(40, 40)] < 0 && A10.tri[K(30, 40)] > 0, 'TPI: floor below its surroundings, ridge above; curvature: floor a hollow, ridge a crest');
+// Sea level rise floods only low ground connected to the sea: a hollow behind a ridge stays dry.
+const zS = new Float32Array(9 * 9).fill(5); for (let i = 0; i < 9; i++) { zS[i] = 0; zS[9 + i] = 0.5; zS[18 + i] = 3; zS[27 + i] = 0.4; }
+const seaM = new Uint8Array(81); for (let i = 0; i < 9; i++) seaM[i] = 1;
+const fl = TR.inundate({ n: 9, z: zS }, seaM, 1);
+ok(fl[9 + 4] === 1 && fl[27 + 4] === 0 && fl[4] === 0, 'sea level rise: the shore floods, the hollow behind the ridge stays dry, the sea itself is not counted');
+// Shapefile and ZIP writers.
+ok(GIS.crc32(new TextEncoder().encode('123456789')) === 0xcbf43926, 'CRC-32 check value');
+const shpFiles = GIS.shapefiles([
+  { type: 'Feature', properties: { layer: 'building', height: 9.5, name: 'Yalı Camii' }, geometry: { type: 'Polygon', coordinates: [[[26.4, 40.1], [26.401, 40.1], [26.401, 40.101], [26.4, 40.101], [26.4, 40.1]], [[26.4002, 40.1002], [26.4002, 40.1004], [26.4004, 40.1004], [26.4004, 40.1002], [26.4002, 40.1002]]] } },
+  { type: 'Feature', properties: { layer: 'tree', kind: 'broad', height: 8 }, geometry: { type: 'Point', coordinates: [26.4005, 40.1005] } }], 'x_');
+const shpB = shpFiles.find(f => f.name === 'x_building.shp').data, shpV = new DataView(shpB.buffer, shpB.byteOffset), dbfB = shpFiles.find(f => f.name === 'x_building.dbf').data;
+const ring0 = [...Array(5)].map((_, q) => [shpV.getFloat64(100 + 8 + 52 + 16 * q, true), shpV.getFloat64(100 + 8 + 60 + 16 * q, true)]);
+const sa = ring0.slice(0, -1).reduce((a, p, q) => a + p[0] * ring0[q + 1][1] - ring0[q + 1][0] * p[1], 0);
+ok(shpFiles.length === 10 && shpV.getInt32(0) === 9994 && shpV.getInt32(24) * 2 === shpB.length && shpV.getInt32(32, true) === 5 && shpV.getInt32(100 + 8 + 36, true) === 2 && sa < 0, 'shapefile: header, file length, polygon with a hole, outer ring clockwise');
+ok(new DataView(dbfB.buffer, dbfB.byteOffset).getUint32(4, true) === 1 && new TextDecoder().decode(dbfB).includes('Yalı Camii'), 'dBASE table: one record, UTF-8 name kept');
+GIS.zip([{ name: 'a.txt', data: 'hello' }, { name: 'b/c.txt', data: 'world' }]).then(z => {
+  const v = new DataView(z.buffer), e = z.length - 22;
+  ok(v.getUint32(0, true) === 0x04034b50 && v.getUint32(e, true) === 0x06054b50 && v.getUint16(e + 10, true) === 2 && v.getUint32(14, true) === GIS.crc32(new TextEncoder().encode('hello')), 'ZIP: local header, CRC and central directory with two entries');
+  console.log(fails ? `\n${fails} failed` : '\nall unit checks passed'); process.exit(fails ? 1 : 0);
+});
 // Multipolygon rings assembled from split member ways.
 const rings = LD.assemble([[[0, 0], [10, 0]], [[10, 0], [10, 10], [0, 10]], [[0, 0], [0, 10]]]);
 ok(rings.length === 1 && rings[0].length === 4, 'multipolygon ways joined into one ring');
@@ -129,4 +156,3 @@ ok(cr.length === 5 && near(Math.abs(OV.area(cr)), 30, 1e-9), 'Overture pieces cl
 const cl2 = OV.clipLine([[-5, 5], [5, 5], [5, 15], [8, 5], [15, 5]], b9);
 ok(cl2.length === 2 && near(cl2[0][0][0], 0, 1e-9) && near(cl2[1][cl2[1].length - 1][0], 10, 1e-9), `a line leaving and re-entering a tile splits into ${cl2.length} pieces`);
 
-console.log(fails ? `\n${fails} failed` : '\nall unit checks passed'); process.exit(fails ? 1 : 0);
