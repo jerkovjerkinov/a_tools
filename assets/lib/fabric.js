@@ -150,14 +150,15 @@ function masses(j, site, R, { defH = 9, floorH = 3, ground = () => 0, ghsl = nul
       const outer = clean(p.outer, true);
       if (outer.length < 3 || !inBox(outer) || Math.abs(signedArea(outer)) < 2) return;
       const holes = p.holes.map(hh => clean(hh, false)).filter(hh => hh.length >= 3);
-      const z0 = Math.min(...outer.map(([x, y]) => ground(x, y)));
+      // Base at the lowest ground under the footprint; the height counts from the middle ground, so on a slope the uphill side is not buried.
+      const gs = outer.map(([x, y]) => ground(x, y)), z0 = Math.min(...gs), zm = (z0 + Math.max(...gs)) / 2;
       let h = oh.h, est = null;
       if (!oh.known) {
         const a = Math.abs(signedArea(outer)), cx = outer.reduce((s, q) => s + q[0], 0) / outer.length, cy = outer.reduce((s, q) => s + q[1], 0) / outer.length;
         const g = ghsl ? ghsl.at(cx, cy) : 0;
         h = estimate(t, a, el.id, g, defH, floorH); est = g > 0 ? 'ghsl' : 'default';
       }
-      out.push({ outer, holes, z0: z0 + minH, z1: z0 + Math.max(h, minH + 1), known: oh.known, est, tags: t });
+      out.push({ outer, holes, z0: z0 + minH, z1: zm + Math.max(h, minH + 1), known: oh.known, est, tags: t });
     });
   });
   return out;
@@ -188,20 +189,93 @@ function destairGrid(e, n) {
   for (let i = 0; i < n; i++) destair([...Array(n)].map((_, j) => a[j * n + i])).forEach((v, j) => a[j * n + i] = v);
   return a;
 }
-function openProfile(z, step, win = 60) {
+// keep: never lower a point by more than this many metres, so narrow real summits survive (Ankara Kalesi).
+function openProfile(z, step, win = 60, keep = 12) {
   z = destair(z);
   const w = Math.max(1, Math.round(win / 2 / step)), n = z.length;
   const run = (a, f) => a.map((_, i) => f(...a.slice(Math.max(0, i - w), Math.min(n, i + w + 1))));
-  return run(run(z, Math.min), Math.max);
+  return run(run(z, Math.min), Math.max).map((v, i) => Math.max(v, z[i] - keep));
 }
-function openGrid(e, n, step, win = 200) {
+function openGrid(e, n, step, win = 200, keep = 12) {
   e = destairGrid(e, n);
   const w = Math.max(1, Math.round(win / 2 / step));
   const pass = (a, f) => a.map((_, k) => { const i = k % n, j = Math.floor(k / n), v = [];
     for (let b = Math.max(0, j - w); b <= Math.min(n - 1, j + w); b++) for (let c = Math.max(0, i - w); c <= Math.min(n - 1, i + w); c++) v.push(a[b * n + c]);
     return f(...v); });
-  return pass(pass(e, Math.min), Math.max);
+  return pass(pass(e, Math.min), Math.max).map((v, k) => Math.max(v, e[k] - keep));
 }
 
-window.ATFabric = { estimate, destair, destairGrid, openProfile, openGrid, load, parse, svg, stats, area, xy, signedArea, clean, inside, osmHeight, fetchMasses, masses };
+// OSM coastlines run with land on the left. Join the ways into chains, cut them to the square, and close each
+// piece along the square's edge clockwise (keeping the sea on the right).
+function seaRings(ways, R) {   // ways in local metres; R = half-size of the square
+  if (!ways.length) return [];
+  const key = p => p[0].toFixed(2) + ',' + p[1].toFixed(2);
+  let chains = ways.map(w => w.slice());
+  for (let merged = true; merged;) {
+    merged = false;
+    for (let i = 0; i < chains.length && !merged; i++) for (let k = 0; k < chains.length; k++) {
+      if (i === k) continue;
+      if (key(chains[i][chains[i].length - 1]) === key(chains[k][0])) { chains[i] = chains[i].concat(chains[k].slice(1)); chains.splice(k, 1); merged = true; break; }
+    }
+  }
+  const ins = p => Math.abs(p[0]) < R && Math.abs(p[1]) < R;   // strict: a vertex on the edge counts as outside, so the piece still gets an entry
+  const per = p => { const [x, y] = p, e = 1e-6;   // position along the edge, counter-clockwise from the south-west corner
+    if (Math.abs(y + R) < e) return x + R; if (Math.abs(x - R) < e) return 2 * R + y + R; if (Math.abs(y - R) < e) return 4 * R + (R - x); return 6 * R + (R - y); };
+  const cross = (p, q) => {   // first point where segment p→q meets the square's edge, with its t
+    let best = null;
+    for (const [ax, v] of [[0, R], [0, -R], [1, R], [1, -R]]) {
+      if (q[ax] === p[ax]) continue;
+      const t = (v - p[ax]) / (q[ax] - p[ax]); if (t < 0 || t > 1) continue;
+      const pt = [p[0] + t * (q[0] - p[0]), p[1] + t * (q[1] - p[1])], o = 1 - ax;
+      if (Math.abs(pt[o]) <= R + 1e-9 && (!best || t < best.t)) best = { t, pt: [Math.max(-R, Math.min(R, pt[0])), Math.max(-R, Math.min(R, pt[1]))] };
+    }
+    return best;
+  };
+  const pieces = [], islands = [];
+  chains.forEach(c0 => {
+    let c = c0; const closed = key(c[0]) === key(c[c.length - 1]);
+    if (closed && c.every(ins)) { islands.push(c); return; }
+    if (!closed && c.length > 1) {   // a chain that stops inside the square (data cut short): extend its end segments outwards
+      const ext = (a, b) => { const dx = b[0] - a[0], dy = b[1] - a[1], L0 = Math.hypot(dx, dy) || 1; return [b[0] + dx / L0 * 4 * R, b[1] + dy / L0 * 4 * R]; };
+      if (ins(c[0])) c = [ext(c[1], c[0]), ...c];
+      if (ins(c[c.length - 1])) c = [...c, ext(c[c.length - 2], c[c.length - 1])];
+    }
+    let cur = ins(c[0]) ? null : null;
+    for (let i = 0; i + 1 < c.length; i++) {
+      const p = c[i], q = c[i + 1], pi = ins(p), qi = ins(q);
+      if (pi && cur) cur.push(p);
+      if (pi && !qi) { const x = cross(q, p); if (cur && x) { cur.push(x.pt); cur.exit = x.pt; pieces.push(cur); } cur = null; }
+      else if (!pi && qi) { const x = cross(p, q); cur = x ? [x.pt] : null; if (cur) cur.entry = x.pt; }
+      else if (!pi && !qi) {   // a segment may pass through the square without a vertex inside
+        const a = cross(p, q), b = cross(q, p);
+        if (a && b && Math.hypot(a.pt[0] - b.pt[0], a.pt[1] - b.pt[1]) > 0.01) { const pc = [a.pt, b.pt]; pc.entry = a.pt; pc.exit = b.pt; pieces.push(pc); }
+      }
+    }
+  });
+  if (!pieces.length) {   // no coastline crosses the square: either all land, or open sea around islands
+    if (!islands.length) return [];
+    return [{ outer: [[-R, -R], [R, -R], [R, R], [-R, R]], holes: islands }];
+  }
+  const corners = [[-R, -R, 0], [R, -R, 2 * R], [R, R, 4 * R], [-R, R, 6 * R]];
+  const used = new Set(), rings = [];
+  pieces.forEach((pc, i0) => {
+    if (used.has(i0)) return;
+    const ring = []; let i = i0, guard = 0;
+    while (guard++ < 50) {
+      used.add(i); const cur = pieces[i]; ring.push(...cur);
+      // Walk clockwise (decreasing perimeter position) from this exit to the nearest entry.
+      const se = per(cur.exit);
+      let bestJ = -1, bestD = Infinity;
+      pieces.forEach((pj, j) => { const d = ((se - per(pj.entry)) % (8 * R) + 8 * R) % (8 * R); if (d < bestD) { bestD = d; bestJ = j; } });
+      corners.slice().sort((a, b) => b[2] - a[2]).concat(corners.slice().sort((a, b) => b[2] - a[2]).map(c => [c[0], c[1], c[2] - 8 * R]))
+        .forEach(c => { const d = se - c[2]; if (d > 1e-6 && d < bestD) ring.push([c[0], c[1]]); });
+      if (bestJ === i0 || used.has(bestJ)) break;
+      i = bestJ;
+    }
+    rings.push({ outer: ring, holes: islands.filter(s => inside(s[0], ring)) });
+  });
+  return rings;
+}
+
+window.ATFabric = { seaRings, estimate, destair, destairGrid, openProfile, openGrid, load, parse, svg, stats, area, xy, signedArea, clean, inside, osmHeight, fetchMasses, masses };
 })();

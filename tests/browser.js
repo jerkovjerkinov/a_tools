@@ -105,10 +105,17 @@ const runBtn = async (p, id = 'run') => { await p.click('#' + id); await p.waitF
     await p.context().close();
   }
 
-  // 5. Urban Analysis Map: printing all four sheets keeps clip ids unique (clipping failed when they clashed).
+  // 5. Urban Analysis Map: printing all four sheets keeps clip ids unique (clipping failed when they clashed);
+  //    the sea is drawn from the coastline (it was missing on coastal sheets); civic buildings count as landmarks.
   {
-    const p = await page(browser, 'tools/urban-map/index.html', { osm: F.osm(170, 1500) });
+    const osm = F.osm(170, 1500);
+    osm.elements.push({ type: 'way', id: 990001, tags: { natural: 'coastline' }, geometry: [[-100, 300], [-120, 0], [-100, -300]].map(LL) });   // sea to the west
+    osm.elements.push({ type: 'way', id: 990002, tags: { amenity: 'theatre', name: 'Test Theatre' }, geometry: box(20, 20, 40, 40) });
+    const p = await page(browser, 'tools/urban-map/index.html', { osm });
     await runBtn(p);
+    const u = await p.evaluate(() => ({ sea: data.water.filter(w => w.t.natural === 'sea').length, theatre: data.marks.some(m => m.name === 'Test Theatre') }));
+    ok(u.sea > 0, `Urban Analysis Map: sea drawn from the coastline (${u.sea} areas)`);
+    ok(u.theatre, 'Urban Analysis Map: a named theatre counts as a landmark');
     await p.evaluate(() => { window.print = () => {}; }); await p.click('#printAll');
     const dup = await p.evaluate(() => { const ids = [...document.querySelectorAll('clipPath[id], pattern[id]')].map(e => e.id); return ids.length - new Set(ids).size; });
     ok(dup === 0, `Urban Analysis Map: clip and pattern ids unique after print (${dup} duplicates)`);

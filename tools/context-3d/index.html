@@ -158,7 +158,9 @@ function groundAt(T, x, y) {
   if (!T) return 0;
   const gx = Math.min(GRID - 1.001, Math.max(0, (x + T.R) / T.step)), gy = Math.min(GRID - 1.001, Math.max(0, (y + T.R) / T.step));
   const i = Math.floor(gx), j = Math.floor(gy), fx = gx - i, fy = gy - j, E = (a, b) => T.e[b * GRID + a];
-  return E(i, j) * (1 - fx) * (1 - fy) + E(i + 1, j) * fx * (1 - fy) + E(i, j + 1) * (1 - fx) * fy + E(i + 1, j + 1) * fx * fy - T.base;
+  // The same two triangles per cell as the exported mesh (diagonal from (i, j) to (i+1, j+1)), so buildings sit on it exactly.
+  const a = E(i, j), b = E(i + 1, j), c = E(i + 1, j + 1), d = E(i, j + 1);
+  return (fx >= fy ? a + fx * (b - a) + fy * (c - b) : a + fy * (d - a) + fx * (c - d)) - T.base;
 }
 
 function buildModel(j, T, G) {

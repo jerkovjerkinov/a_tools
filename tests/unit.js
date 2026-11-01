@@ -15,9 +15,11 @@ const left = Math.max(...op.slice(10, 110).map((z, i) => z - ground(i + 10)));  
 ok(left < 2.5, 'openProfile removes 12 m roof bumps (max left ' + left.toFixed(1) + ' m)');
 const hill = [...Array(120)].map((_, i) => 80 * Math.exp(-(((i - 60) * step) ** 2) / (2 * 120 ** 2)));
 ok(near(Math.max(...F.openProfile(hill, step, 60)), 80, 3), 'openProfile keeps a real hill');
-const n = 12, g = [...Array(n * n)].map((_, k) => { const i = k % n, j = Math.floor(k / n); return 10 + i + ((i % 3 === 1 && j % 3 === 1) ? 15 : 0); });
+const n = 12, g = [...Array(n * n)].map((_, k) => { const i = k % n, j = Math.floor(k / n); return 10 + i + ((i % 3 === 1 && j % 3 === 1) ? 12 : 0); });
 const og = F.openGrid(g, n, 40, 100);
-ok(og.every((z, k) => z - (10 + (k % n)) < 1.5), 'openGrid removes single-cell bumps');
+ok(og.every((z, k) => z - (10 + (k % n)) < 1.5), 'openGrid removes single-cell 12 m bumps');
+const peak = [...Array(n * n)].map((_, k) => (k === 5 * n + 5 ? 90 : 0)), op2 = F.openGrid(peak, n, 90, 200);
+ok(op2[5 * n + 5] >= 78, `openGrid keeps a narrow summit within 12 m (90 m peak → ${op2[5 * n + 5]} m; Ankara Kalesi was flattened)`);
 
 // Nearest-cell staircase: treads of equal values become a straight slope.
 const stairs = [...Array(60)].map((_, i) => 100 + 10 * Math.floor(i / 10));   // 10 m steps every 10 samples

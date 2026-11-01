@@ -147,7 +147,7 @@ const LU = [
   ['residential', 'Residential'], ['mixed', 'Residential with shops'], ['commercial', 'Commercial, retail, food'],
   ['office', 'Office'], ['education', 'Education'], ['health', 'Health'], ['religious', 'Religious'],
   ['civic', 'Public, civic, culture'], ['hotel', 'Hotel, tourism'], ['industrial', 'Industrial, storage'],
-  ['transport', 'Transport, parking'], ['sport', 'Sport'], ['unknown', 'Not tagged']
+  ['transport', 'Transport, parking'], ['sport', 'Sport'], ['unknown', 'Use not in OSM']
 ];
 const LUN = Object.fromEntries(LU.map(([k, n]) => [k, n]));
 const RES = /^(house|residential|apartments|detached|semidetached_house|terrace|dormitory|bungalow|farm|cabin)$/;
@@ -177,7 +177,7 @@ async function run() {
     (nwr["building"];way["highway"];way["railway"~"^(rail|tram|subway|light_rail|narrow_gauge)$"];
      node["highway"="bus_stop"];node["public_transport"];node["railway"~"^(station|halt|tram_stop|subway_entrance)$"];nwr["amenity"~"^(ferry_terminal|bus_station)$"];
      nwr["landuse"];nwr["leisure"];nwr["natural"~"^(water|wood|scrub|grassland|beach|tree|tree_row)$"];nwr["place"="square"];nwr["waterway"="riverbank"];
-     nwr["historic"];nwr["heritage"];nwr["tourism"~"^(attraction|museum|viewpoint|artwork|gallery)$"];nwr["man_made"~"^(tower|lighthouse)$"];
+     nwr["historic"];nwr["heritage"];way["natural"="coastline"];nwr["amenity"~"^(place_of_worship|townhall|theatre|arts_centre|library|university|courthouse|concert_hall)$"]["name"];nwr["tourism"~"^(attraction|museum|viewpoint|artwork|gallery)$"];nwr["man_made"~"^(tower|lighthouse)$"];
      node["amenity"];node["shop"];node["office"];); out geom;`;
   $('run').disabled = true; $('status').innerHTML = '<span class="spinner"></span>Loading OpenStreetMap data…';
   try {
@@ -202,7 +202,7 @@ function build(j, o, w, h) {
   const rings = el => el.type === 'way' ? (el.geometry ? [el.geometry.map(P)] : []) : (el.members || []).filter(m => m.geometry && m.geometry.length > 2).map(m => m.geometry.map(P));
   const centre = el => el.type === 'node' ? P(el) : (() => { const r = rings(el)[0] || []; return r.length ? r.reduce((a, p) => [a[0] + p[0] / r.length, a[1] + p[1] / r.length], [0, 0]) : null; })();
   const inFrame = p => p && Math.abs(p[0]) <= w / 2 && Math.abs(p[1]) <= h / 2;
-  const D = { o, w, h, buildings: [], landuse: [], green: [], water: [], squares: [], roads: [], rails: [], stops: [], trees: [], marks: [], pois: [] };
+  const D = { o, w, h, coast: [], buildings: [], landuse: [], green: [], water: [], squares: [], roads: [], rails: [], stops: [], trees: [], marks: [], pois: [] };
   j.elements.forEach(el => {
     const t = el.tags || {};
     if (el.type === 'node') {
@@ -223,12 +223,15 @@ function build(j, o, w, h) {
     }
     else if (t.railway && el.type === 'way' && el.geometry) D.rails.push({ line: el.geometry.map(P), k: t.railway });
     else if (t.place === 'square') { if (el.type !== 'node') D.squares.push({ r: rings(el), t }); }
+    else if (t.natural === 'coastline' && el.geometry) D.coast.push(el.geometry.map(P));
     else if (t.natural === 'water' || t.waterway === 'riverbank' || t.landuse === 'reservoir' || t.landuse === 'basin') D.water.push({ r: rings(el), t });
     else if (/^(park|garden|playground|pitch|nature_reserve|common|dog_park|recreation_ground)$/.test(t.leisure || '') || /^(grass|forest|recreation_ground|cemetery|meadow|village_green|allotments)$/.test(t.landuse || '') || /^(wood|scrub|grassland|beach)$/.test(t.natural || '')) D.green.push({ r: rings(el), t, kind: t.leisure || t.landuse || t.natural });
     else if (t.landuse) D.landuse.push({ r: rings(el), t, kind: t.landuse });
     if (t.natural === 'tree_row' && el.geometry) el.geometry.forEach((g, i) => i % 2 || D.trees.push(P(g)));
-    if ((t.historic || t.heritage || /^(attraction|museum|viewpoint|artwork|gallery)$/.test(t.tourism || '') || /^(tower|lighthouse)$/.test(t.man_made || '')) && t.name) {
-      const c = centre(el); if (inFrame(c)) D.marks.push({ p: c, name: t.name, kind: t.historic ? 'Historic ' + t.historic.replace(/_/g, ' ') : t.heritage ? 'Listed' : t.tourism ? t.tourism.replace(/_/g, ' ') : t.man_made, listed: !!(t.heritage || t['heritage:operator']), wd: t.wikidata || '' });
+    const civic = new RegExp('^(place_of_worship|townhall|theatre|arts_centre|library|university|courthouse|concert_hall)$').test(t.amenity || '');
+    if ((t.historic || t.heritage || /^(attraction|museum|viewpoint|artwork|gallery)$/.test(t.tourism || '') || /^(tower|lighthouse)$/.test(t.man_made || '') || civic) && t.name) {
+      const c = centre(el); if (inFrame(c)) D.marks.push({ p: c, name: t.name, rank: t.heritage || t.historic ? 3 : t.tourism || t.man_made ? 2 : 1,
+        kind: t.historic ? 'Historic ' + t.historic.replace(/_/g, ' ') : t.heritage ? 'Listed' : t.tourism ? t.tourism.replace(/_/g, ' ') : t.man_made ? t.man_made : t.amenity.replace(/_/g, ' '), listed: !!(t.heritage || t['heritage:operator']), wd: t.wikidata || '' });
     }
   });
   // Buildings: class from their own tags, then shops inside a residential building make it mixed, then landuse below fills the gaps.
@@ -252,8 +255,15 @@ function build(j, o, w, h) {
   D.stops = D.stops.filter(s => inFrame(s.p));
   // De-duplicate stops of the same kind and name within 40 m (platforms on both sides of a street).
   D.stopsU = []; D.stops.forEach(s => { if (!D.stopsU.some(u => u.kind === s.kind && u.name === s.name && Math.hypot(u.p[0] - s.p[0], u.p[1] - s.p[1]) < 40)) D.stopsU.push(s); });
-  D.marks.sort((a, b) => a.p[1] === b.p[1] ? a.p[0] - b.p[0] : b.p[1] - a.p[1]);   // number from the top, left to right
-  const seen = new Set(); D.marks = D.marks.filter(m => { const k = m.name.toLowerCase(); if (seen.has(k)) return false; seen.add(k); return true; }).slice(0, 40);
+  // Keep the 40 most notable (heritage first, then attractions, then civic buildings), numbered from the top, left to right.
+  const seen = new Set(); D.marks = D.marks.sort((a, b) => b.rank - a.rank).filter(m => { const k = m.name.toLowerCase(); if (seen.has(k)) return false; seen.add(k); return true; }).slice(0, 40)
+    .sort((a, b) => a.p[1] === b.p[1] ? a.p[0] - b.p[0] : b.p[1] - a.p[1]);
+  // Sea from the coastline (land on the left), closed along the frame; seaRings works on a square, so scale to it and back.
+  const sx = w / 2, sy = h / 2;
+  ATFabric.seaRings(D.coast.map(l => l.map(([x, y]) => [x / sx, y / sy])), 1).forEach(s => {
+    const back = r => r.map(([x, y]) => [x * sx, y * sy]);
+    D.water.push({ r: [back(s.outer), ...s.holes.map(back)], t: { natural: 'sea' } });
+  });
   return D;
 }
 
@@ -443,7 +453,7 @@ function legend(kind, x, y, P) {
   } else {
     head('Landmarks'); yy -= 1;
     D.marks.slice(0, 30).forEach((mk, i) => { row(`<circle cx="${x + 3}" cy="${yy + 1.8}" r="1.7" fill="${mk.listed ? st.markListed : st.mark}"/><text x="${x + 3}" y="${yy + 2.6}" font-size="2" font-weight="700" fill="#fff" text-anchor="middle">${i + 1}</text>`, (mk.name.length > 34 ? mk.name.slice(0, 33) + '…' : mk.name)); o += `<text x="${x + 8}" y="${yy + 0.8}" font-size="2.1" fill="${st.faint}">${esc(mk.kind)}</text>`; yy += 2; });
-    if (!D.marks.length) o += para(x, yy, ['No named historic places, monuments or attractions are mapped here.'], st), yy = para.y;
+    if (!D.marks.length) o += para(x, yy, ['No named historic places, monuments, attractions or civic buildings are mapped here.'], st), yy = para.y;
     yy += 3; row(box('heritage'), 'Historic or listed building'); row(`<circle cx="${x + 3}" cy="${yy + 1.8}" r="1.6" fill="${st.markListed}"/>`, 'Listed (heritage tag)');
   }
   return o;
@@ -482,7 +492,8 @@ function openStats() {
     ['Woods and scrub', 'wood', /wood|forest|scrub/], ['Cemeteries', 'cemetery', /cemetery/], ['Beaches', 'beach', /beach/]];
   const out = groups.map(([n, key, re]) => ({ n, key, a: data.green.filter(g => re.test(g.kind || '')).reduce((a, g) => a + clippedArea(g.r), 0) })).filter(r => r.a > 0);
   const sq = data.squares.reduce((a, g) => a + clippedArea(g.r), 0); if (sq) out.push({ n: 'Squares, pedestrian areas', key: 'square', a: sq });
-  const wa = data.water.reduce((a, g) => a + clippedArea(g.r), 0); if (wa) out.push({ n: 'Water', key: 'waterOn', a: wa });
+  const wa = data.water.filter(g => g.t.natural !== 'sea').reduce((a, g) => a + clippedArea(g.r), 0); if (wa) out.push({ n: 'Water', key: 'waterOn', a: wa });
+  const sa = data.water.filter(g => g.t.natural === 'sea').reduce((a, g) => a + clippedArea(g.r), 0); if (sa) out.push({ n: 'Sea', key: 'waterOn', a: sa });
   return out;
 }
 
