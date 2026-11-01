@@ -69,7 +69,7 @@
         <select id="terr"><option value="0">Flat</option><option value="1" selected>True heights</option><option value="2">Exaggerated × 2</option></select>
       </div>
       <div class="field"><label for="hmode">Heights not in OSM</label>
-        <select id="hmode"><option value="est" selected>Estimate from footprint (1–6 floors)</option><option value="2">2 floors</option><option value="4">4 floors</option><option value="6">6 floors</option></select>
+        <select id="hmode"><option value="est" selected>Estimate (local built height + footprint)</option><option value="2">2 floors</option><option value="4">4 floors</option><option value="6">6 floors</option></select>
       </div>
       <div class="checks">
         <label><input type="checkbox" id="optShadow" checked> Shadows</label>
@@ -113,6 +113,7 @@
 <script src="../../assets/lib/fabric.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/earcut@2.2.4/dist/earcut.min.js"></script>
 <script src="../../assets/lib/model.js"></script>
+<script src="../../assets/lib/ghsl.js"></script>
 <script>
 const $ = id => document.getElementById(id);
 const rad = Math.PI / 180;
@@ -170,15 +171,17 @@ async function run() {
      nwr["historic"]["name"];nwr["tourism"~"^(attraction|museum|viewpoint|gallery)$"]["name"];nwr["man_made"~"^(tower|lighthouse|pier|minaret)$"];way["building:part"];way["barrier"="city_wall"];way["historic"="citywalls"];); out geom;`;
   $('run').disabled = true; $('status').innerHTML = '<span class="spinner"></span>Loading OpenStreetMap data…';
   try {
-    const [osm, ter] = await Promise.allSettled([ATools.overpass(q, 120000), terrainGrid(o, R)]);
+    const [osm, ter, gh] = await Promise.allSettled([ATools.overpass(q, 120000), terrainGrid(o, R), ATGhsl.load(o, R)]);
     if (osm.status !== 'fulfilled') throw osm.reason;
     data = build(osm.value, o, R);
     data.terr = ter.status === 'fulfilled' ? ter.value : null;
+    data.ghsl = gh.status === 'fulfilled' && gh.value.cells ? gh.value : null;
     if (!data.blds.length && !data.roads.length) { data = null; $('status').textContent = 'Nothing is mapped in OpenStreetMap here. Move the square or make it larger.'; }
     else {
       hidden.clear(); data.blds.forEach(b => Object.assign(b, heightOf(b, $('hmode').value)));
       const bl = data.blds.filter(b => !b.wall), est = bl.filter(b => !b.known).length;
       $('status').textContent = `${bl.length.toLocaleString('en-GB')} buildings (${Math.round(100 * est / Math.max(1, bl.length))}% without a height in OSM), ${data.labels.length} named places. `
+        + (data.ghsl ? `Local average building height ${data.ghsl.median.toFixed(0)} m (GHSL). ` : '')
         + (data.terr ? `Ground ${Math.round(data.terr.min)}–${Math.round(data.terr.min + data.terr.range)} m.` : 'Terrain could not be loaded, so the ground is flat.');
       $('title').placeholder = o.name || 'Place name';
       document.querySelector('#tabs button[data-t="draw"]').disabled = false;
@@ -463,7 +466,14 @@ function heightOf(b, mode) {
   if (/^(church|cathedral|chapel|synagogue)$/.test(t.building || '') || t.amenity === 'place_of_worship') return { h: 14, m, known: false };
   if (b.part) return { h: Math.max(m + 3.2, b.parent ? heightOf(b.parent, mode).h : 9), m, known: false };
   let fl;
-  if (mode === 'est') {
+  const g = mode === 'est' && data && data.ghsl ? data.ghsl.at(b.c[0], b.c[1]) : 0;
+  if (g > 0) {
+    // GHSL average building height of the 90 m cell, scaled by footprint (small sheds lower, large blocks higher), ±1 floor of jitter.
+    const r = hash(b.id), k = b.a < 50 ? 0.6 : b.a < 150 ? 0.9 : b.a < 600 ? 1 : 1.1;
+    fl = Math.max(b.a >= 80 ? 2 : 1, Math.round(Math.min(12, Math.max(1, g / 3.1 * k))) + (r % 3) - 1);
+    if (/^(garage|garages|shed|kiosk|roof|hut|carport)$/.test(t.building || '')) fl = 1;
+    if (/^(house|bungalow|detached|semidetached_house)$/.test(t.building || '')) fl = Math.min(fl, 2);
+  } else if (mode === 'est') {
     const r = hash(b.id);
     fl = b.a < 35 ? 1 + r % 2 : b.a < 120 ? 2 + r % 3 : b.a < 600 ? 3 + r % 4 : 3 + r % 3;
     if (/^(school|public|civic|hospital|office|commercial)$/.test(t.building || '')) fl = Math.max(fl, 3);
@@ -745,10 +755,11 @@ function drawing() {
   const bl = D.blds.filter(b => !b.wall), est = bl.filter(b => !b.known).length, pct = Math.round(100 * est / Math.max(1, bl.length));
   const notes = [`Area: ${2 * R} × ${2 * R} m, seen from the ${dirName(view)}.`, showSh ? `Sun from the ${dirName(sunAz)} at ${sunAlt}°.` : '',
     `${bl.length.toLocaleString('en-GB')} buildings. ${pct}% have no height in OSM;`,
-    mode === 'est' ? 'these are estimated from footprint size' : `these are drawn at ${mode} floors`, mode === 'est' ? '(1 to 6 floors of 3.2 m).' : '(3.2 m each).', '',
-    'Data © OpenStreetMap contributors (ODbL).', `Drawn with a_tools, ${new Date().toISOString().slice(0, 10)}.`].filter((x, i) => x !== '' || i === 5);
+    mode !== 'est' ? `these are drawn at ${mode} floors` : D.ghsl ? 'these are estimated from the local average' : 'these are estimated from footprint size',
+    mode !== 'est' ? '(3.2 m each).' : D.ghsl ? 'building height (GHSL) and footprint size.' : '(1 to 6 floors of 3.2 m).', '',
+    'Data © OpenStreetMap contributors (ODbL).', ...(D.ghsl && mode === 'est' ? ['Heights: GHS-BUILT-H 2018, EC JRC (CC BY 4.0).'] : []), `Drawn with a_tools, ${new Date().toISOString().slice(0, 10)}.`].filter((x, i) => x !== '' || i === 5);
   o += `<text x="${PX}" y="${yy}" font-size="12" letter-spacing="2" font-weight="700" fill="${C.ink}">NOTES</text>`;
-  notes.forEach((n, i) => o += `<text x="${PX}" y="${yy + 24 + i * 19}" font-size="12.5" fill="${i >= notes.length - 2 ? C.mute : C.ink}">${esc(n)}</text>`);
+  notes.forEach((n, i) => o += `<text x="${PX}" y="${yy + 24 + i * 19}" font-size="12.5" fill="${/^(Data|Heights:|Drawn)/.test(n) ? C.mute : C.ink}">${esc(n)}</text>`);
   o += `<text x="${PX}" y="${H - 52}" font-size="12" fill="${C.mute}">jerkovjerkinov.github.io/a_tools</text>`;
   return o + '</svg>';
 }
