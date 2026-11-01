@@ -320,7 +320,7 @@ const STYLES = {
       religious: [['@v']], civic: [['#5a5a5a']], industrial: [['#a8a8a8']], transport: [['@vL']], sport: [['#e2e2e2']], unknown: [['#ffffff']],
       bld: [['#bdbdbd']], bldLight: [['#d9d9d9']], heritage: [['#111111']], fig: [['#111111']],
       fl1: [['#ffffff']], fl2: [['@hzL']], fl3: [['@h45']], fl4: [['@x']], fl5: [['#111111']], flU: [['#ffffff']],
-      water: [['@hzL']], waterOn: [['@hz']], greenQuiet: [['#ffffff']], park: [['@dot']], play: [['@dotS']], wood: [['@dotD']], cemetery: [['@x']], beach: [['@dotS']], square: [['#ffffff']], tree: [['#111111']]
+      water: [['@hzL']], waterOn: [['@hz']], greenQuiet: [['#ffffff']], park: [['#e6e6e6']], play: [['@vL']], wood: [['@h135']], cemetery: [['@x']], beach: [['#f3f3f3']], square: [['#ffffff']], tree: [['#111111']]
     },
     road: { major: '#111111', secondary: '#111111', tertiary: '#444444', local: '#9a9a9a', ped: '#666666', foot: '#111111', cycle: '#111111', rail: '#111111', tram: '#111111', metro: '#111111' },
     stop: { bus: '#111111', dolmus: '#111111', tram: '#111111', metro: '#111111', rail: '#111111', ferry: '#111111' }, mark: '#111111', markListed: '#111111', outlined: true
@@ -365,7 +365,7 @@ const greenKey = k => /cemetery/.test(k) ? 'cemetery' : /pitch|playground/.test(
 
 let clipN = 0;
 // The map of one sheet, drawn into the box X0, Y0, W × H mm (the full sheet frame or a smaller atlas panel).
-// Line hatches in sheet mm, matching patterns(): [angle, spacing, width]. Dot screens stay pattern fills and are kept off buildings.
+// Line hatches in sheet mm, matching patterns(): [angle, spacing, width]. No dot screens: Chrome prints each dot as geometry (Ankara Ink 17 MB → 3 MB without them).
 const HATCH = { h45: [[45, .707, .12]], h45d: [[45, .354, .1]], h135: [[-45, .707, .12]], x: [[45, .566, .09], [-45, .566, .09]], hz: [[0, .6, .1]], hzL: [[0, 1.2, .07]], v: [[90, .6, .1]], vL: [[90, 1.2, .08]] };
 let hcN = 0;
 function hatch(id, d, c) {

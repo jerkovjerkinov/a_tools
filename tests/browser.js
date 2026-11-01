@@ -137,7 +137,7 @@ const runBtn = async (p, id = 'run') => { await p.click('#' + id); await p.waitF
     // Ink sheets reached 30–90 MB as PDF (pattern fills re-tiled, every dash turned into geometry).
     await p.evaluate(() => { style = 'ink'; window.print = () => {}; printSheets(['atlas', 'landuse', 'transport', 'open', 'landmarks', 'density', 'figure']); }); await p.emulateMedia({ media: 'print' });
     const pdf = await p.pdf({ preferCSSPageSize: true, printBackground: true }); await p.emulateMedia({ media: 'screen' });
-    ok(pdf.length < 6e6, `Urban Analysis Map: all seven Ink sheets print to ${(pdf.length / 1e6).toFixed(1)} MB (limit 6 MB)`);
+    ok(pdf.length < 4e6, `Urban Analysis Map: all seven Ink sheets print to ${(pdf.length / 1e6).toFixed(1)} MB (limit 4 MB)`);
     ok(np < 120, `Urban Analysis Map: buildings drawn as one path per class (${np} paths for 170 buildings)`);
     ok(!p.errs.length, 'urban map: no errors');
     await p.context().close();
