@@ -119,6 +119,9 @@ const runBtn = async (p, id = 'run') => { await p.click('#' + id); await p.waitF
     await p.evaluate(() => { window.print = () => {}; }); await p.click('#printAll');
     const dup = await p.evaluate(() => { const ids = [...document.querySelectorAll('clipPath[id], pattern[id]')].map(e => e.id); return ids.length - new Set(ids).size; });
     ok(dup === 0, `Urban Analysis Map: clip and pattern ids unique after print (${dup} duplicates)`);
+    // Each building used to be its own hatched path; Chrome re-encodes the hatch per path and the ink density PDF reached 260 MB.
+    const np = await p.evaluate(() => { style = 'ink'; return (sheetSvg('density').match(/<path/g) || []).length; });
+    ok(np < 120, `Urban Analysis Map: buildings drawn as one path per class (${np} paths for 170 buildings)`);
     ok(!p.errs.length, 'urban map: no errors');
     await p.context().close();
   }

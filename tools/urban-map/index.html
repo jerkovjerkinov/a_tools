@@ -76,7 +76,7 @@
       </div>
       <div class="row" style="margin-top:8px">
         <button id="print1" class="btn" disabled>This sheet · PDF</button>
-        <button id="printAll" class="btn" disabled>All 4 · PDF</button>
+        <button id="printAll" class="btn" disabled>All sheets · PDF</button>
       </div>
       <p class="hint">Data © OpenStreetMap contributors. What is not mapped in OSM is missing here, so walk the site and correct the drawing. Road class stands in for traffic: count traffic on site for real numbers. In the print dialog choose A3 landscape, no margins, 100% scale.</p>
     </div>
@@ -90,6 +90,9 @@
         <button data-t="transport" disabled>Transport</button>
         <button data-t="open" disabled>Open space</button>
         <button data-t="landmarks" disabled>Landmarks</button>
+        <button data-t="density" disabled>Density</button>
+        <button data-t="figure" disabled>Figure-ground</button>
+        <button data-t="atlas" disabled>Atlas</button>
       </div>
     </div>
     <div id="map"></div>
@@ -101,6 +104,7 @@
 <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="../../assets/atools.js"></script>
 <script src="../../assets/lib/fabric.js"></script>
+<script src="../../assets/lib/ghsl.js"></script>
 <script>
 const $ = id => document.getElementById(id);
 const rad = Math.PI / 180;
@@ -181,10 +185,10 @@ async function run() {
      node["amenity"];node["shop"];node["office"];); out geom;`;
   $('run').disabled = true; $('status').innerHTML = '<span class="spinner"></span>Loading OpenStreetMap data…';
   try {
-    const j = await ATools.overpass(q, 120000);
+    const [j, gh] = await Promise.all([ATools.overpass(q, 120000), ATGhsl.load(o, Math.max(w, h) / 2).then(g => g.cells ? g : null).catch(() => null)]);
     $('status').innerHTML = '<span class="spinner"></span>Classifying…';
     await new Promise(r => setTimeout(r, 20));
-    data = build(j, o, w, h);
+    data = build(j, o, w, h, gh);
     if (!data.buildings.length && !data.roads.length) { data = null; showTab('map'); document.querySelectorAll('#tabs button').forEach(b => b.disabled = b.dataset.t !== 'map'); $('printAll').disabled = true; $('status').textContent = 'Nothing is mapped in OpenStreetMap inside this frame. Move the frame or pick a larger scale.'; $('run').disabled = false; return; }
     $('status').textContent = `${fmt(data.buildings.length)} buildings, ${fmt(data.roads.length)} street segments, ${fmt(data.stops.length)} stops, ${data.marks.length} landmarks.`;
     document.querySelectorAll('#tabs button').forEach(b => b.disabled = false);
@@ -197,12 +201,12 @@ async function run() {
   $('run').disabled = false;
 }
 
-function build(j, o, w, h) {
+function build(j, o, w, h, ghsl) {
   const P = g => ATFabric.xy(g.lat, g.lon, o);
   const rings = el => el.type === 'way' ? (el.geometry ? [el.geometry.map(P)] : []) : (el.members || []).filter(m => m.geometry && m.geometry.length > 2).map(m => m.geometry.map(P));
   const centre = el => el.type === 'node' ? P(el) : (() => { const r = rings(el)[0] || []; return r.length ? r.reduce((a, p) => [a[0] + p[0] / r.length, a[1] + p[1] / r.length], [0, 0]) : null; })();
   const inFrame = p => p && Math.abs(p[0]) <= w / 2 && Math.abs(p[1]) <= h / 2;
-  const D = { o, w, h, coast: [], buildings: [], landuse: [], green: [], water: [], squares: [], roads: [], rails: [], stops: [], trees: [], marks: [], pois: [] };
+  const D = { o, w, h, ghsl: !!ghsl, coast: [], buildings: [], landuse: [], green: [], water: [], squares: [], roads: [], rails: [], stops: [], trees: [], marks: [], pois: [] };
   j.elements.forEach(el => {
     const t = el.tags || {};
     if (el.type === 'node') {
@@ -249,7 +253,9 @@ function build(j, o, w, h) {
     if ((c === 'residential' || c === 'unknown') && b.shops) c = c === 'residential' || inAny(b.c, resLU) ? 'mixed' : 'commercial';
     if (c === 'unknown' && b.c) c = inAny(b.c, resLU) ? 'residential' : inAny(b.c, indLU) ? 'industrial' : inAny(b.c, comLU) ? 'commercial' : 'unknown';
     b.cls = c; b.area = Math.abs(ATFabric.signedArea(b.r[0]));
-    b.lv = parseFloat(b.t['building:levels']) || null;
+    const lv = parseFloat(String(b.t['building:levels'] || '').replace(',', '.')), hh = parseFloat(String(b.t.height || '').replace(',', '.'));
+    b.fl = lv > 0 ? Math.round(lv + (parseFloat(b.t['roof:levels']) || 0)) : hh > 0 ? Math.max(1, Math.round(hh / 3)) : null;
+    if (b.fl == null && ghsl && b.c) { const g = ghsl.at(b.c[0], b.c[1]); if (g > 0) { b.fl = Math.max(1, Math.round(ATFabric.estimate(b.t, b.area, b.c[0] * 7 + b.c[1], g, 9, 3) / 3)); b.flEst = true; } }
   });
   D.buildings = D.buildings.filter(b => b.c && Math.abs(b.c[0]) <= w / 2 + 20 && Math.abs(b.c[1]) <= h / 2 + 20);
   D.stops = D.stops.filter(s => inFrame(s.p));
@@ -277,7 +283,8 @@ const STYLES = {
     f: {
       residential: [['#ebe5d5']], mixed: [['#e2b48a']], commercial: [['#c8553d']], office: [['#a7786b']], education: [['#5d7c99']], health: [['#a3b8c9']],
       religious: [['#7d7391']], civic: [['#2f4356']], hotel: [['#dba39b']], industrial: [['#8e8a82']], transport: [['#bdb9b1']], sport: [['#a6b48c']], unknown: [['#ffffff']],
-      bld: [['#d6d3cb']], bldLight: [['#e3e0d9']], heritage: [['#c8553d']],
+      bld: [['#d6d3cb']], bldLight: [['#e3e0d9']], heritage: [['#c8553d']], fig: [['#1b1b19']],
+      fl1: [['#efe9da']], fl2: [['#dac8a4']], fl3: [['#b89a70']], fl4: [['#7f654c']], fl5: [['#c8553d']], flU: [['#ffffff']],
       water: [['#d9e4ec']], waterOn: [['#a9c4d6']], greenQuiet: [['#e6ebdf']], park: [['#bfd3a8']], play: [['#d3e2b8']], wood: [['#9db78a']], cemetery: [['#cfd6c4']], beach: [['#efe2bd']], square: [['#f1e4cc']], tree: [['#6f9a5b', 0.9]]
     },
     road: { major: '#1b1b19', secondary: '#4a4945', tertiary: '#8a8882', local: '#c9c6be', ped: '#b7cf9f', foot: '#6f9a5b', cycle: '#2f5d8a', rail: '#1b1b19', tram: '#8e6fc1', metro: '#c8553d' },
@@ -289,7 +296,8 @@ const STYLES = {
       residential: [[RISO.y, 0.4, 'y']], mixed: [[RISO.y, 0.5, 'y'], [RISO.p, 0.35, 'p']], commercial: [[RISO.p, 1, 'p']], office: [[RISO.p, 0.55, 'p']], hotel: [[RISO.p, 0.28, 'p']],
       education: [[RISO.b, 1, 'b']], health: [[RISO.b, 0.5, 'b']], religious: [[RISO.b, 0.32, 'b'], [RISO.p, 0.32, 'p']], civic: [[RISO.b, 0.9, 'b'], [RISO.p, 0.6, 'p']],
       industrial: [[RISO.b, 0.28, 'b'], [RISO.y, 0.3, 'y']], transport: [[RISO.b, 0.16, 'b']], sport: [[RISO.y, 0.75, 'y'], [RISO.b, 0.45, 'b']], unknown: [],
-      bld: [[RISO.b, 0.24, 'b']], bldLight: [[RISO.b, 0.14, 'b']], heritage: [[RISO.p, 1, 'p']],
+      bld: [[RISO.b, 0.24, 'b']], bldLight: [[RISO.b, 0.14, 'b']], heritage: [[RISO.p, 1, 'p']], fig: [[RISO.b, 1, 'b']],
+      fl1: [[RISO.b, 0.14, 'b']], fl2: [[RISO.b, 0.34, 'b']], fl3: [[RISO.b, 0.6, 'b']], fl4: [[RISO.b, 0.9, 'b']], fl5: [[RISO.b, 1, 'b'], [RISO.p, 0.85, 'p']], flU: [],
       water: [[RISO.b, 0.12, 'b']], waterOn: [[RISO.b, 0.42, 'b']], greenQuiet: [[RISO.y, 0.22, 'y']], park: [[RISO.y, 0.7, 'y'], [RISO.b, 0.38, 'b']], play: [[RISO.y, 0.85, 'y'], [RISO.b, 0.2, 'b']],
       wood: [[RISO.y, 0.7, 'y'], [RISO.b, 0.7, 'b']], cemetery: [[RISO.y, 0.3, 'y'], [RISO.b, 0.3, 'b']], beach: [[RISO.y, 0.55, 'y']], square: [[RISO.p, 0.18, 'p'], [RISO.y, 0.3, 'y']], tree: [[RISO.y, 1, 'y'], [RISO.b, 0.85, 'b']]
     },
@@ -301,7 +309,8 @@ const STYLES = {
     f: {
       residential: [['#ffffff']], mixed: [['@h45']], commercial: [['#111111']], office: [['@h45d']], hotel: [['@hz']], education: [['@x']], health: [['@dot']],
       religious: [['@v']], civic: [['#5a5a5a']], industrial: [['#a8a8a8']], transport: [['@dotS']], sport: [['@dotD']], unknown: [['#ffffff']],
-      bld: [['#bdbdbd']], bldLight: [['#d9d9d9']], heritage: [['#111111']],
+      bld: [['#bdbdbd']], bldLight: [['#d9d9d9']], heritage: [['#111111']], fig: [['#111111']],
+      fl1: [['#ffffff']], fl2: [['@dotS']], fl3: [['@dot']], fl4: [['@h45d']], fl5: [['#111111']], flU: [['#ffffff']],
       water: [['@hzL']], waterOn: [['@hz']], greenQuiet: [['#ffffff']], park: [['@dot']], play: [['@dotS']], wood: [['@dotD']], cemetery: [['@x']], beach: [['@dotS']], square: [['#ffffff']], tree: [['#111111']]
     },
     road: { major: '#111111', secondary: '#111111', tertiary: '#444444', local: '#9a9a9a', ped: '#666666', foot: '#111111', cycle: '#111111', rail: '#111111', tram: '#111111', metro: '#111111' },
@@ -338,32 +347,38 @@ const ROADW = {   // width at 1:1000 in mm and the style slot — width shrinks 
 };
 const STOPL = { bus: 'B', dolmus: 'D', tram: 'T', metro: 'M', rail: 'R', ferry: 'F' };
 const STOPN = { bus: 'Bus stop', dolmus: 'Dolmuş stop', tram: 'Tram stop', metro: 'Metro entrance', rail: 'Rail station', ferry: 'Ferry pier' };
+const TITLES = { landuse: 'Land use', transport: 'Transport and access', open: 'Open space network', landmarks: 'Landmarks and heritage', density: 'Density and height', figure: 'Figure-ground', atlas: 'Analysis atlas' };
+const NOS = { landuse: '01', transport: '02', open: '03', landmarks: '04', density: '05', figure: '06', atlas: '00' };
+const FL = [['fl1', '1–2 floors', 1, 2], ['fl2', '3–4 floors', 3, 4], ['fl3', '5–6 floors', 5, 6], ['fl4', '7–9 floors', 7, 9], ['fl5', '10+ floors', 10, 999]];
+const flKey = n => n == null ? 'flU' : (FL.find(r => n >= r[2] && n <= r[3]) || FL[4])[0];
 const greenKey = k => /cemetery/.test(k) ? 'cemetery' : /pitch|playground/.test(k) ? 'play' : /wood|forest|scrub/.test(k) ? 'wood' : /beach/.test(k) ? 'beach' : 'park';
 
 let clipN = 0;
-function sheetSvg(kind) {
-  const D = data, st = STYLES[style], k = 1000 / S, X0 = PAGE.mx, Y0 = PAGE.my + 16, P = 'um' + (++clipN) + '-';   // ids unique per render: the screen copy is hidden when printing
-  const X = x => (X0 + PAGE.mapW / 2 + x * k).toFixed(2), Y = y => (Y0 + PAGE.mapH / 2 - y * k).toFixed(2);
+// The map of one sheet, drawn into the box X0, Y0, W × H mm (the full sheet frame or a smaller atlas panel).
+function mapLayer(kind, X0, Y0, W, H, P) {
+  const D = data, st = STYLES[style], f = W / PAGE.mapW, k = f * 1000 / S;
+  const X = x => (X0 + W / 2 + x * k).toFixed(2), Y = y => (Y0 + H / 2 - y * k).toFixed(2);
   const path = rs => rs.map(r => 'M' + r.map(p => X(p[0]) + ' ' + Y(p[1])).join('L') + 'Z').join('');
   const line = l => 'M' + l.map(p => X(p[0]) + ' ' + Y(p[1])).join('L');
-  const z = S / 1000, rw = mm => Math.max(mm / Math.sqrt(z), 0.18);
+  const z = S / 1000, rw = mm => Math.max(mm * Math.max(f, 0.55) / Math.sqrt(z), 0.12), dotR = r => r * Math.max(f, 0.6);
   const G = { base: '', y: '', b: '', p: '', top: '' };
   const fillRef = c => c[0] === '@' ? `url(#${P}${c.slice(1)})` : c;
   // Paint a shape with a style fill; extra = stroke attributes for the base layer.
-  const paint = (d, key, extra = '') => {
+  const orient = rs => rs.map((r, i) => { const hole = rs.some((o, j) => j !== i && ATFabric.inside(r[0], o)); return (ATFabric.signedArea(r) > 0) === !hole ? r : r.slice().reverse(); });
+  const paint = (d, key, extra = '', rule = 'evenodd') => {
     const ls = st.f[key] || [];
-    if (!ls.length && extra) G.base += `<path d="${d}" fill="none" ${extra} fill-rule="evenodd"/>`;
-    ls.forEach(([c, op = 1, ink], i) => { const s = `<path d="${d}" fill="${fillRef(c)}"${op < 1 ? ` fill-opacity="${op}"` : ''} fill-rule="evenodd"${i === 0 && !ink ? ' ' + extra : ''}/>`; if (ink) G[ink] += s; else G.base += s; });
-    if (st.inks && extra && ls.length) G.top += `<path d="${d}" fill="none" ${extra} fill-rule="evenodd"/>`;
+    if (!ls.length && extra) G.base += `<path d="${d}" fill="none" ${extra} fill-rule="${rule}"/>`;
+    ls.forEach(([c, op = 1, ink], i) => { const s = `<path d="${d}" fill="${fillRef(c)}"${op < 1 ? ` fill-opacity="${op}"` : ''} fill-rule="${rule}"${i === 0 && !ink ? ' ' + extra : ''}/>`; if (ink) G[ink] += s; else G.base += s; });
+    if (st.inks && extra && ls.length) G.top += `<path d="${d}" fill="none" ${extra} fill-rule="${rule}"/>`;
   };
   const stroke = (d, c, w, extra = '', op) => `<path d="${d}" fill="none" stroke="${c}" stroke-width="${w.toFixed(2)}"${op ? ` stroke-opacity="${op}"` : ''} stroke-linecap="round" stroke-linejoin="round"${extra}/>`;
   const inkOf = c => st.inks ? (Object.keys(RISO).find(i => RISO[i] === c) || null) : null;
   const put = (s, c) => { const i = inkOf(c); if (i) G[i] += s; else G.base += s; };
 
   // Ground: water and green on every sheet, quietly except on the open space sheet.
-  const on = kind === 'open';
+  const on = kind === 'open', fig = kind === 'figure';
   D.water.forEach(x => paint(path(x.r), on ? 'waterOn' : 'water'));
-  D.green.forEach(x => paint(path(x.r), on ? greenKey(x.kind) : 'greenQuiet'));
+  if (!fig) D.green.forEach(x => paint(path(x.r), on ? greenKey(x.kind) : 'greenQuiet'));
   if (on) D.squares.forEach(x => paint(path(x.r), 'square', `stroke="${st.soft}" stroke-width="0.12"`));
   // Streets.
   const order = ['track', 'path', 'footway', 'steps', 'cycleway', 'service', 'living_street', 'residential', 'unclassified', 'pedestrian', 'tertiary_link', 'secondary_link', 'primary_link', 'trunk_link', 'motorway_link', 'tertiary', 'secondary', 'primary', 'trunk', 'motorway'];
@@ -374,6 +389,7 @@ function sheetSvg(kind) {
     D.rails.forEach(r => { const c = r.k === 'tram' ? st.road.tram : r.k === 'subway' ? st.road.metro : st.road.rail;
       put(stroke(line(r.line), c, 0.6, r.k === 'subway' ? ' stroke-dasharray="1.2 0.8"' : ''), c);
       if (r.k === 'rail') put(stroke(line(r.line), st.paper, 0.3, ' stroke-dasharray="1 1" stroke-linecap="butt"'), null); });
+  } else if (fig) {
   } else if (st.street !== st.ground) {
     rs.forEach(r => G.base += stroke(line(r.line), st.street, rw(ROADW[r.k][0]) * 0.9));
   } else if (!st.inks) {
@@ -381,29 +397,37 @@ function sheetSvg(kind) {
   }
   // Buildings.
   const edge = st.outlined ? `stroke="${st.ink}" stroke-width="0.1"` : st.edge ? `stroke="${st.edge}" stroke-width="0.12"` : '';
+  const groups = new Map();
   D.buildings.forEach(b => {
-    const key = kind === 'landuse' ? b.cls : kind === 'landmarks' ? (b.t.heritage || b.t.historic ? 'heritage' : 'bldLight') : kind === 'transport' ? 'bldLight' : 'bld';
-    const ex = key === 'unknown' ? `stroke="${st.faint}" stroke-width="0.12"${st.outlined ? ' stroke-dasharray=".5 .4"' : ''}` : kind === 'landuse' || st.outlined ? edge : '';
-    paint(path(b.r), key, ex);
+    const key = kind === 'landuse' ? b.cls : kind === 'density' ? flKey(b.fl) : kind === 'figure' ? 'fig' : kind === 'landmarks' ? (b.t.heritage || b.t.historic ? 'heritage' : 'bldLight') : kind === 'transport' ? 'bldLight' : 'bld';
+    const ex = key === 'unknown' || key === 'flU' ? `stroke="${st.faint}" stroke-width="0.12"${st.outlined ? ' stroke-dasharray=".5 .4"' : ''}` : kind === 'density' && b.flEst ? `stroke="${st.ink}" stroke-width="0.1" stroke-dasharray=".45 .35"` : kind === 'landuse' || kind === 'density' || (st.outlined && !fig) ? edge : '';
+    const g = key + '\u0001' + ex; groups.set(g, (groups.get(g) || '') + path(orient(b.r)));
   });
+  // One path per class keeps the PDF small: a hatch pattern is otherwise re-encoded for every building.
+  // Overlapping footprints share a path, so holes are made by winding (outer one way, courtyards the other), not even-odd.
+  groups.forEach((d, g) => { const [key, ex] = g.split('\u0001'); paint(d, key, ex, 'nonzero'); });
   let top = '';
   if (on) D.trees.forEach(p => { const r = Math.max(0.4, 3 * k).toFixed(2); st.f.tree.forEach(([c, op = 1, ink]) => { const s = `<circle cx="${X(p[0])}" cy="${Y(p[1])}" r="${r}" fill="${c}" fill-opacity="${op}"/>`; if (ink) G[ink] += s; else G.base += s; }); });
-  if (kind === 'transport') D.stopsU.forEach(s => top += `<circle cx="${X(s.p[0])}" cy="${Y(s.p[1])}" r="1.5" fill="${st.stop[s.kind]}" stroke="${st.paper}" stroke-width="0.3"/><text x="${X(s.p[0])}" y="${(+Y(s.p[1]) + 0.75).toFixed(2)}" font-size="2" font-weight="700" fill="#fff" text-anchor="middle">${STOPL[s.kind]}</text>`);
-  if (kind === 'landmarks') D.marks.forEach((mk, i) => top += `<circle cx="${X(mk.p[0])}" cy="${Y(mk.p[1])}" r="2.2" fill="${mk.listed ? st.markListed : st.mark}" stroke="${st.paper}" stroke-width="0.4"/><text x="${X(mk.p[0])}" y="${(+Y(mk.p[1]) + 0.9).toFixed(2)}" font-size="2.4" font-weight="700" fill="#fff" text-anchor="middle">${i + 1}</text>`);
+  if (kind === 'transport') D.stopsU.forEach(s => top += `<circle cx="${X(s.p[0])}" cy="${Y(s.p[1])}" r="${dotR(1.5)}" fill="${st.stop[s.kind]}" stroke="${st.paper}" stroke-width="0.3"/>` + (f > 0.8 ? `<text x="${X(s.p[0])}" y="${(+Y(s.p[1]) + 0.75).toFixed(2)}" font-size="2" font-weight="700" fill="#fff" text-anchor="middle">${STOPL[s.kind]}</text>` : ''));
+  if (kind === 'landmarks') D.marks.forEach((mk, i) => top += `<circle cx="${X(mk.p[0])}" cy="${Y(mk.p[1])}" r="${dotR(2.2)}" fill="${mk.listed ? st.markListed : st.mark}" stroke="${st.paper}" stroke-width="0.3"/><text x="${X(mk.p[0])}" y="${(+Y(mk.p[1]) + 0.9 * Math.max(f, 0.6)).toFixed(2)}" font-size="${(2.4 * Math.max(f, 0.6)).toFixed(2)}" font-weight="700" fill="#fff" text-anchor="middle">${i + 1}</text>`);
   // Risograph: each ink is its own layer, overprinted with multiply and a slight misregistration.
   const reg = { y: [0, 0], b: [0, 0], p: [0.22, -0.15] };
   const m = G.base + (st.inks || []).map(i => G[i] ? `<g style="mix-blend-mode:multiply" transform="translate(${reg[i][0]} ${reg[i][1]})">${G[i]}</g>` : '').join('') + G.top + top;
+  const id = P + kind + 'clip';
+  return `<defs><clipPath id="${id}"><rect x="${X0}" y="${Y0}" width="${W}" height="${H}"/></clipPath></defs><g clip-path="url(#${id})"><rect x="${X0}" y="${Y0}" width="${W}" height="${H}" fill="${fig ? st.paper : st.ground}"/>${m}</g>`
+    + `<rect x="${X0}" y="${Y0}" width="${W}" height="${H}" fill="none" stroke="${st.ink}" stroke-width="0.25"/>`;
+}
 
+function sheetSvg(kind) {
+  if (kind === 'atlas') return atlasSvg();
+  const D = data, st = STYLES[style], k = 1000 / S, X0 = PAGE.mx, Y0 = PAGE.my + 16, P = 'um' + (++clipN) + '-';   // ids unique per render: the screen copy is hidden when printing
   // Page.
-  const titles = { landuse: 'Land use', transport: 'Transport and access', open: 'Open space network', landmarks: 'Landmarks and heritage' };
-  const nos = { landuse: '01', transport: '02', open: '03', landmarks: '04' };
   let o = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${PAGE.w} ${PAGE.h}" font-family="Inter, Helvetica, Arial, sans-serif" fill="${st.ink}">`;
-  o += `<rect width="${PAGE.w}" height="${PAGE.h}" fill="${st.paper}"/><defs><clipPath id="${P}clip"><rect x="${X0}" y="${Y0}" width="${PAGE.mapW}" height="${PAGE.mapH}"/></clipPath>${patterns(P, st.ink)}</defs>`;
-  o += `<text x="${X0}" y="${PAGE.my + 4}" font-size="2.6" font-weight="600" fill="${st.accent}" letter-spacing=".5">${nos[kind]} — URBAN ANALYSIS</text>`;
-  o += `<text x="${X0}" y="${PAGE.my + 11.5}" font-size="7" font-weight="600" letter-spacing="-.1">${esc(titles[kind])}</text>`;
+  o += `<rect width="${PAGE.w}" height="${PAGE.h}" fill="${st.paper}"/><defs>${patterns(P, st.ink)}</defs>`;
+  o += `<text x="${X0}" y="${PAGE.my + 4}" font-size="2.6" font-weight="600" fill="${st.accent}" letter-spacing=".5">${NOS[kind]} — URBAN ANALYSIS</text>`;
+  o += `<text x="${X0}" y="${PAGE.my + 11.5}" font-size="7" font-weight="600" letter-spacing="-.1">${esc(TITLES[kind])}</text>`;
   o += `<text x="${X0 + PAGE.mapW}" y="${PAGE.my + 11.5}" font-size="3" text-anchor="end" fill="${st.soft}">${esc($('title').value.trim() || D.o.name || '')}  ·  ${D.o.lat.toFixed(4)}° N  ${D.o.lng.toFixed(4)}° E</text>`;
-  o += `<g clip-path="url(#${P}clip)"><rect x="${X0}" y="${Y0}" width="${PAGE.mapW}" height="${PAGE.mapH}" fill="${st.ground}"/>${m}</g>`;
-  o += `<rect x="${X0}" y="${Y0}" width="${PAGE.mapW}" height="${PAGE.mapH}" fill="none" stroke="${st.ink}" stroke-width="0.25"/>`;
+  o += mapLayer(kind, X0, Y0, PAGE.mapW, PAGE.mapH, P);
   // Scale bar and north arrow, light.
   const bar = S <= 1000 ? 50 : S <= 2000 ? 100 : 250, bl = bar * k, bx = X0 + 6, by = Y0 + PAGE.mapH - 7;
   o += `<rect x="${bx - 2}" y="${by - 5}" width="${bl + 22}" height="9" fill="${st.paper}" opacity=".9"/>`;
@@ -450,6 +474,19 @@ function legend(kind, x, y, P) {
     yy += 3; head('Reading the map');
     const bArea = D.buildings.reduce((a, b) => a + b.area, 0);
     o += para(x, yy, [`Built footprint covers ${fmt(100 * bArea / (D.w * D.h), 0)}% of the frame.`, `Green and squares cover ${fmt(100 * os.reduce((a, r) => a + (r.key === 'waterOn' ? 0 : r.a), 0) / (D.w * D.h), 1)}%.`, 'Trees are only those mapped in OSM.'], st);
+  } else if (kind === 'density') {
+    const ds = densityStats(); head('Height in floors'); sub('buildings · footprint');
+    ds.rows.forEach(r => row(box(r.k), r.n, `${fmt(r.c)} · ${Math.round(100 * r.a / Math.max(1, ds.area))}%`));
+    if (ds.est) { row(`<rect x="${x}" y="${yy}" width="6" height="3.6" fill="none" stroke="${st.ink}" stroke-width="0.15" stroke-dasharray=".45 .35"/>`, 'Floors estimated (GHSL)', fmt(ds.est)); }
+    yy += 3; head('Reading the map');
+    o += para(x, yy, [`About ${fmt(ds.gfa / 1e4, 1)} ha of floor area on ${fmt(ds.area / 1e4, 1)} ha of footprint: a floor area ratio of ${fmt(ds.gfa / (D.w * D.h), 2)} over the whole frame and ${fmt(ds.gfa / Math.max(1, ds.area), 1)} floors on average.`,
+      ds.est ? `${Math.round(100 * ds.est / Math.max(1, D.buildings.length))}% of buildings have no floors in OSM; their floors are estimated from the GHSL average building height (EC JRC 2018) and drawn with a dashed edge.` : '',
+      ds.unk ? `${fmt(ds.unk)} buildings have no height at all: survey these.` : ''], st); yy = para.y;
+  } else if (kind === 'figure') {
+    const area = D.buildings.reduce((a, b) => a + b.area, 0), med = D.buildings.map(b => b.area).sort((a, b) => a - b)[D.buildings.length >> 1] || 0;
+    head('Figure-ground'); row(box('fig'), 'Buildings', fmt(D.buildings.length));
+    yy += 3; head('Reading the map');
+    o += para(x, yy, [`Built coverage ${fmt(100 * area / (D.w * D.h), 0)}% of the frame.`, `Median footprint ${fmt(med, 0)} m²: ${!med ? '–' : med < 150 ? 'a fine grain of small plots' : med < 600 ? 'a medium grain' : 'a coarse grain of large blocks'}.`, 'Black is built, white is open: streets, courtyards, parks and water read as one void.'], st); yy = para.y;
   } else {
     head('Landmarks'); yy -= 1;
     D.marks.slice(0, 30).forEach((mk, i) => { row(`<circle cx="${x + 3}" cy="${yy + 1.8}" r="1.7" fill="${mk.listed ? st.markListed : st.mark}"/><text x="${x + 3}" y="${yy + 2.6}" font-size="2" font-weight="700" fill="#fff" text-anchor="middle">${i + 1}</text>`, (mk.name.length > 34 ? mk.name.slice(0, 33) + '…' : mk.name)); o += `<text x="${x + 8}" y="${yy + 0.8}" font-size="2.1" fill="${st.faint}">${esc(mk.kind)}</text>`; yy += 2; });
@@ -465,6 +502,29 @@ function para(x, y, lines, st = STYLES[style]) {
 }
 
 // ---------- Statistics ----------
+function densityStats() {
+  const rows = FL.map(([k, n]) => ({ k, n, c: 0, a: 0 })).concat([{ k: 'flU', n: 'No height in OSM', c: 0, a: 0 }]);
+  let gfa = 0, area = 0, est = 0, unk = 0;
+  data.buildings.forEach(b => { const r = rows.find(q => q.k === flKey(b.fl)); r.c++; r.a += b.area; area += b.area; if (b.fl) gfa += b.area * b.fl; else unk++; if (b.flEst) est++; });
+  return { rows: rows.filter(r => r.c), gfa, area, est, unk };
+}
+// The atlas: all six analyses small on one A3, for a board overview.
+function atlasSvg() {
+  const D = data, st = STYLES[style], P = 'um' + (++clipN) + '-', kinds = ['landuse', 'transport', 'open', 'landmarks', 'density', 'figure'];
+  const gw = 128, gh = gw * PAGE.mapH / PAGE.mapW, gx = 12, gy = 30, dx = 136, dy = gh + 17;
+  let o = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${PAGE.w} ${PAGE.h}" font-family="Inter, Helvetica, Arial, sans-serif" fill="${st.ink}">`;
+  o += `<rect width="${PAGE.w}" height="${PAGE.h}" fill="${st.paper}"/><defs>${patterns(P, st.ink)}</defs>`;
+  o += `<text x="${PAGE.mx}" y="${PAGE.my + 4}" font-size="2.6" font-weight="600" fill="${st.accent}" letter-spacing=".5">00 — URBAN ANALYSIS</text>`;
+  o += `<text x="${PAGE.mx}" y="${PAGE.my + 11.5}" font-size="7" font-weight="600" letter-spacing="-.1">${esc($('title').value.trim() || D.o.name || 'Analysis atlas')}</text>`;
+  o += `<text x="${PAGE.w - PAGE.mx}" y="${PAGE.my + 11.5}" font-size="3" text-anchor="end" fill="${st.soft}">Six readings of one frame · 1:${S * PAGE.mapW / gw | 0} · ${D.o.lat.toFixed(4)}° N ${D.o.lng.toFixed(4)}° E</text>`;
+  kinds.forEach((kd, i) => {
+    const x = gx + (i % 3) * dx, y = gy + Math.floor(i / 3) * dy;
+    o += `<text x="${x}" y="${y - 2}" font-size="3.2" font-weight="600">${NOS[kd]}  ${esc(TITLES[kd])}</text>`;
+    o += mapLayer(kd, x, y, gw, gh, P);
+  });
+  o += `<text x="${PAGE.mx}" y="${PAGE.h - 6}" font-size="2.2" fill="${st.faint}">Data © OpenStreetMap contributors (ODbL)${D.ghsl ? '; estimated floors GHS-BUILT-H 2018, EC JRC (CC BY 4.0)' : ''}, downloaded ${new Date().toISOString().slice(0, 10)}. Full legends on the single sheets. Made with a_tools.</text>`;
+  return o + '</svg>';
+}
 function landuseStats() {
   const by = {}; let area = 0;
   data.buildings.forEach(b => { (by[b.cls] ||= { k: b.cls, n: 0, a: 0 }); by[b.cls].n++; by[b.cls].a += b.area; area += b.area; });
@@ -504,7 +564,9 @@ function counts(kind) {
     .concat(Object.entries(km).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([k, v]) => [k.replace(/_/g, ' '), fmt(v, 2) + ' km', ''])); }
   if (kind === 'open') rows = openStats().map(r => [`${swatch(r.key)}${r.n}`, fmt(r.a / 1e4, 2) + ' ha', fmt(100 * r.a / (data.w * data.h), 1) + '%']).concat([['Trees mapped', fmt(data.trees.length), '']]);
   if (kind === 'landmarks') rows = data.marks.map((m, i) => [`${i + 1}. ${esc(m.name)}`, esc(m.kind), m.wd ? `<a href="https://www.wikidata.org/wiki/${esc(m.wd)}" target="_blank" rel="noopener">wiki</a>` : '']);
-  $('cntTitle').textContent = { landuse: 'Land use', transport: 'Transport', open: 'Open space', landmarks: 'Landmarks' }[kind];
+  if (kind === 'density') { const ds = densityStats(); rows = ds.rows.map(r => [`${swatch(r.k)}${r.n}`, fmt(r.c), Math.round(100 * r.a / Math.max(1, ds.area)) + '%']).concat([['Floor area ratio of the frame', fmt(ds.gfa / (data.w * data.h), 2), ''], ['Estimated from GHSL', fmt(ds.est), '']]); }
+  if (kind === 'figure' || kind === 'atlas') { const a = data.buildings.reduce((s, b) => s + b.area, 0); rows = [['Buildings', fmt(data.buildings.length), ''], ['Built coverage', fmt(100 * a / (data.w * data.h), 0) + '%', '']]; }
+  $('cntTitle').textContent = { landuse: 'Land use', transport: 'Transport', open: 'Open space', landmarks: 'Landmarks', density: 'Density', figure: 'Figure-ground', atlas: 'Atlas' }[kind];
   $('cnt').innerHTML = rows.map(r => `<tr>${r.map(c => `<td>${c}</td>`).join('')}</tr>`).join('') || '<tr><td>Nothing mapped here.</td></tr>';
   $('cntGroup').hidden = false;
 }
@@ -529,11 +591,13 @@ $('csv').onclick = () => {
   openStats().forEach(r => out.push(['open space', r.n, '', Math.round(r.a), (100 * r.a / (data.w * data.h)).toFixed(2)]));
   out.push(['open space', 'trees mapped', data.trees.length, '', '']);
   data.marks.forEach((m, i) => out.push(['landmarks', `${i + 1}. ${m.name} (${m.kind})`, '', '', '']));
+  const ds = densityStats(); ds.rows.forEach(r => out.push(['density', r.n, r.c, Math.round(r.a), (100 * r.a / Math.max(1, ds.area)).toFixed(1)]));
+  out.push(['density', 'floor area ratio of frame', '', (ds.gfa / (data.w * data.h)).toFixed(3), '']);
   ATools.download(base() + '.csv', out.map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n'), 'text/csv');
 };
 function printSheets(kinds) { $('printArea').innerHTML = kinds.map(k => sheetSvg(k)).join(''); window.print(); }
 $('print1').onclick = () => printSheets([tab]);
-$('printAll').onclick = () => printSheets(['landuse', 'transport', 'open', 'landmarks']);
+$('printAll').onclick = () => printSheets(['atlas', 'landuse', 'transport', 'open', 'landmarks', 'density', 'figure']);
 </script>
 </body>
 </html>
