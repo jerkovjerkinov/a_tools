@@ -181,7 +181,7 @@ async function run() {
     (nwr["building"];way["highway"];way["railway"~"^(rail|tram|subway|light_rail|narrow_gauge)$"];
      node["highway"="bus_stop"];node["public_transport"];node["railway"~"^(station|halt|tram_stop|subway_entrance)$"];nwr["amenity"~"^(ferry_terminal|bus_station)$"];
      nwr["landuse"];nwr["leisure"];nwr["natural"~"^(water|wood|scrub|grassland|beach|tree|tree_row)$"];nwr["place"="square"];nwr["waterway"="riverbank"];
-     nwr["historic"];nwr["heritage"];way["natural"="coastline"];nwr["amenity"~"^(place_of_worship|townhall|theatre|arts_centre|library|university|courthouse|concert_hall)$"]["name"];nwr["tourism"~"^(attraction|museum|viewpoint|artwork|gallery)$"];nwr["man_made"~"^(tower|lighthouse)$"];nwr["wikidata"]["name"];
+     nwr["historic"];nwr["heritage"];way["natural"="coastline"];nwr["amenity"~"^(place_of_worship|townhall|theatre|arts_centre|library|university|courthouse|concert_hall)$"]["name"];nwr["tourism"~"^(attraction|museum|viewpoint|artwork|gallery)$"];nwr["man_made"~"^(tower|lighthouse)$"];
      node["amenity"];node["shop"];node["office"];); out geom;`;
   $('run').disabled = true; $('status').innerHTML = '<span class="spinner"></span>Loading OpenStreetMap data…';
   try {
@@ -236,9 +236,9 @@ function build(j, o, w, h, ghsl) {
     // Squares and named parks of half a hectare or more are landmarks too (Kızılay had none: Güvenpark, Kızılay Meydanı).
     const ring0 = el.type !== 'node' ? rings(el)[0] || [] : [], a0 = Math.abs(ring0.reduce((s, p, i) => { const q = ring0[(i + 1) % ring0.length]; return s + p[0] * q[1] - q[0] * p[1]; }, 0) / 2);
     const square = t.place === 'square' || (t.highway === 'pedestrian' && t.area === 'yes'), park = /^(park|garden)$/.test(t.leisure || '') && a0 >= 5000;
-    // Anything with a Wikidata or Wikipedia entry, except streets, rails and boundaries.
-    const wiki = !!(t.wikidata || t.wikipedia) && !(t.highway && !square) && !t.railway && !t.route && !t.boundary && !t.waterway;
-    if ((t.historic || t.heritage || /^(attraction|museum|viewpoint|artwork|gallery)$/.test(t.tourism || '') || /^(tower|lighthouse)$/.test(t.man_made || '') || civic || square || park || wiki) && t.name && !ATFabric.genericName(t.name)) {
+    // A Wikidata or Wikipedia entry only lifts places that already qualify (otherwise hotels, party offices and the strait won).
+    const wiki = !!(t.wikidata || t.wikipedia);
+    if ((t.historic || t.heritage || /^(attraction|museum|viewpoint|artwork|gallery)$/.test(t.tourism || '') || /^(tower|lighthouse)$/.test(t.man_made || '') || civic || square || park) && t.name && !ATFabric.genericName(t.name) && !t.natural) {
       const base = t.heritage || t.historic ? 3 : t.tourism || t.man_made ? 2 : square || park ? 1.5 : 1;
       const c = centre(el); if (c && inFrame(c)) D.marks.push({ p: c, name: t.name, rank: base + (wiki ? 1.5 : 0),
         kind: t.historic ? 'Historic ' + t.historic.replace(/_/g, ' ') : t.heritage ? 'Listed' : t.tourism ? t.tourism.replace(/_/g, ' ') : t.man_made ? t.man_made : square ? 'square' : t.leisure ? t.leisure : (t.amenity || t.building || t.leisure || t.office || 'place').replace(/_/g, ' ').replace(/^yes$/, 'building'), listed: !!(t.heritage || t['heritage:operator']), wd: t.wikidata || '' });
@@ -264,6 +264,9 @@ function build(j, o, w, h, ghsl) {
     if (b.fl == null && ghsl && b.c) { const g = ghsl.at(b.c[0], b.c[1]); if (g > 0) { b.fl = Math.max(1, Math.round(ATFabric.estimate(b.t, b.area, b.c[0] * 7 + b.c[1], g, 9, 3) / 3)); b.flEst = true; } }
   });
   D.buildings = D.buildings.filter(b => b.c && Math.abs(b.c[0]) <= w / 2 + 20 && Math.abs(b.c[1]) <= h / 2 + 20);
+  // Mapping gaps: share of 90 m cells GHSL calls built that hold no OSM building. Then the floor area ratio is a minimum.
+  if (ghsl) { let built = 0, empty = 0; for (let x = -w / 2 + 45; x < w / 2; x += 90) for (let y = -h / 2 + 45; y < h / 2; y += 90) if (ghsl.at(x, y) > 0) { built++; if (!D.buildings.some(b => Math.abs(b.c[0] - x) < 45 && Math.abs(b.c[1] - y) < 45)) empty++; }
+    D.gap = built >= 4 ? empty / built : 0; }
   D.stops = D.stops.filter(s => inFrame(s.p));
   // De-duplicate stops of the same kind and name within 40 m (platforms on both sides of a street).
   D.stopsU = []; D.stops.forEach(s => { if (!D.stopsU.some(u => u.kind === s.kind && u.name === s.name && Math.hypot(u.p[0] - s.p[0], u.p[1] - s.p[1]) < 40)) D.stopsU.push(s); });
@@ -313,10 +316,10 @@ const STYLES = {
   ink: {
     name: 'Ink', paper: '#ffffff', ground: '#ffffff', street: '#ffffff', ink: '#111111', soft: '#444444', faint: '#777777', accent: '#111111', edge: '#111111',
     f: {
-      residential: [['#ffffff']], mixed: [['@h45']], commercial: [['#111111']], office: [['@h45d']], hotel: [['@hz']], education: [['@x']], health: [['@dot']],
-      religious: [['@v']], civic: [['#5a5a5a']], industrial: [['#a8a8a8']], transport: [['@dotS']], sport: [['@dotD']], unknown: [['#ffffff']],
+      residential: [['#ffffff']], mixed: [['@h45']], commercial: [['#111111']], office: [['@h45d']], hotel: [['@hz']], education: [['@x']], health: [['@h135']],
+      religious: [['@v']], civic: [['#5a5a5a']], industrial: [['#a8a8a8']], transport: [['@vL']], sport: [['#e2e2e2']], unknown: [['#ffffff']],
       bld: [['#bdbdbd']], bldLight: [['#d9d9d9']], heritage: [['#111111']], fig: [['#111111']],
-      fl1: [['#ffffff']], fl2: [['@dotS']], fl3: [['@dot']], fl4: [['@h45d']], fl5: [['#111111']], flU: [['#ffffff']],
+      fl1: [['#ffffff']], fl2: [['@hzL']], fl3: [['@h45']], fl4: [['@x']], fl5: [['#111111']], flU: [['#ffffff']],
       water: [['@hzL']], waterOn: [['@hz']], greenQuiet: [['#ffffff']], park: [['@dot']], play: [['@dotS']], wood: [['@dotD']], cemetery: [['@x']], beach: [['@dotS']], square: [['#ffffff']], tree: [['#111111']]
     },
     road: { major: '#111111', secondary: '#111111', tertiary: '#444444', local: '#9a9a9a', ped: '#666666', foot: '#111111', cycle: '#111111', rail: '#111111', tram: '#111111', metro: '#111111' },
@@ -331,7 +334,8 @@ function patterns(P, c) {
     + L('h45d', 0.5, 0.5, `<path d="M-.125 .125L.125-.125M0 .5L.5 0M.375 .625L.625 .375" stroke="${c}" stroke-width=".1"/>`)
     + L('x', 0.8, 0.8, `<path d="M0 0L.8 .8M.8 0L0 .8" stroke="${c}" stroke-width=".09"/>`)
     + L('hz', 0.6, 0.6, `<path d="M0 .3H.6" stroke="${c}" stroke-width=".1"/>`) + L('hzL', 1.2, 1.2, `<path d="M0 .6H1.2" stroke="${c}" stroke-width=".07"/>`)
-    + L('v', 0.6, 0.6, `<path d="M.3 0V.6" stroke="${c}" stroke-width=".1"/>`)
+    + L('v', 0.6, 0.6, `<path d="M.3 0V.6" stroke="${c}" stroke-width=".1"/>`) + L('vL', 1.2, 1.2, `<path d="M.6 0V1.2" stroke="${c}" stroke-width=".08"/>`)
+    + L('h135', 1, 1, `<path d="M-.25 .75L.25 1.25M0 0L1 1M.75 -.25L1.25 .25" stroke="${c}" stroke-width=".12"/>`)
     + L('dot', 0.8, 0.8, `<circle cx=".2" cy=".2" r=".13" fill="${c}"/><circle cx=".6" cy=".6" r=".13" fill="${c}"/>`)
     + L('dotS', 1.6, 1.6, `<circle cx=".4" cy=".4" r=".14" fill="${c}"/><circle cx="1.2" cy="1.2" r=".14" fill="${c}"/>`)
     + L('dotD', 0.5, 0.5, `<circle cx=".125" cy=".125" r=".11" fill="${c}"/><circle cx=".375" cy=".375" r=".11" fill="${c}"/>`);
@@ -361,6 +365,23 @@ const greenKey = k => /cemetery/.test(k) ? 'cemetery' : /pitch|playground/.test(
 
 let clipN = 0;
 // The map of one sheet, drawn into the box X0, Y0, W × H mm (the full sheet frame or a smaller atlas panel).
+// Line hatches in sheet mm, matching patterns(): [angle, spacing, width]. Dot screens stay pattern fills and are kept off buildings.
+const HATCH = { h45: [[45, .707, .12]], h45d: [[45, .354, .1]], h135: [[-45, .707, .12]], x: [[45, .566, .09], [-45, .566, .09]], hz: [[0, .6, .1]], hzL: [[0, 1.2, .07]], v: [[90, .6, .1]], vL: [[90, 1.2, .08]] };
+let hcN = 0;
+function hatch(id, d, c) {
+  const n = d.match(/-?\d+(?:\.\d+)?/g).map(Number); let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (let i = 0; i + 1 < n.length; i += 2) { x0 = Math.min(x0, n[i]); x1 = Math.max(x1, n[i]); y0 = Math.min(y0, n[i + 1]); y1 = Math.max(y1, n[i + 1]); }
+  const F = v => v.toFixed(2), from = (v, st) => Math.floor(v / st) * st;   // on a global grid, so neighbouring shapes line up
+  return HATCH[id].map(([a, sp, w]) => {
+    let p = '';
+    const k = sp * Math.SQRT2;
+    if (a === 0) for (let y = from(y0, sp); y <= y1 + sp; y += sp) p += `M${F(x0)} ${F(y)}H${F(x1)}`;
+    else if (a === 90) for (let x = from(x0, sp); x <= x1 + sp; x += sp) p += `M${F(x)} ${F(y0)}V${F(y1)}`;
+    else if (a === 45) for (let q = from(x0 + y0, k); q <= x1 + y1 + k; q += k) p += `M${F(q - y0)} ${F(y0)}L${F(q - y1)} ${F(y1)}`;
+    else for (let q = from(x0 - y1, k); q <= x1 - y0 + k; q += k) p += `M${F(q + y0)} ${F(y0)}L${F(q + y1)} ${F(y1)}`;
+    return `<path d="${p}" stroke="${c}" stroke-width="${w}" fill="none"/>`;
+  }).join('');
+}
 function mapLayer(kind, X0, Y0, W, H, P) {
   const D = data, st = STYLES[style], f = W / PAGE.mapW, k = f * 1000 / S;
   const X = x => (X0 + W / 2 + x * k).toFixed(2), Y = y => (Y0 + H / 2 - y * k).toFixed(2);
@@ -374,7 +395,10 @@ function mapLayer(kind, X0, Y0, W, H, P) {
   const paint = (d, key, extra = '', rule = 'evenodd') => {
     const ls = st.f[key] || [];
     if (!ls.length && extra) G.base += `<path d="${d}" fill="none" ${extra} fill-rule="${rule}"/>`;
-    ls.forEach(([c, op = 1, ink], i) => { const s = `<path d="${d}" fill="${fillRef(c)}"${op < 1 ? ` fill-opacity="${op}"` : ''} fill-rule="${rule}"${i === 0 && !ink ? ' ' + extra : ''}/>`; if (ink) G[ink] += s; else G.base += s; });
+    ls.forEach(([c, op = 1, ink], i) => {
+      // Hatches are drawn as real lines clipped to the shape: a pattern fill is re-tiled by Chrome's PDF writer (Ink PDFs reached 30–90 MB).
+      if (c[0] === '@' && HATCH[c.slice(1)]) { const id = 'hc' + (++hcN); G.base += `<path d="${d}" fill="#fff" fill-rule="${rule}"/><clipPath id="${id}"><path d="${d}" clip-rule="${rule}"/></clipPath><g clip-path="url(#${id})">${hatch(c.slice(1), d, st.ink)}</g>` + (i === 0 && extra ? `<path d="${d}" fill="none" ${extra} fill-rule="${rule}"/>` : ''); return; }
+      const s = `<path d="${d}" fill="${fillRef(c)}"${op < 1 ? ` fill-opacity="${op}"` : ''} fill-rule="${rule}"${i === 0 && !ink ? ' ' + extra : ''}/>`; if (ink) G[ink] += s; else G.base += s; });
     if (st.inks && extra && ls.length) G.top += `<path d="${d}" fill="none" ${extra} fill-rule="${rule}"/>`;
   };
   const stroke = (d, c, w, extra = '', op) => `<path d="${d}" fill="none" stroke="${c}" stroke-width="${w.toFixed(2)}"${op ? ` stroke-opacity="${op}"` : ''} stroke-linecap="round" stroke-linejoin="round"${extra}/>`;
@@ -383,7 +407,7 @@ function mapLayer(kind, X0, Y0, W, H, P) {
 
   // Ground: water and green on every sheet, quietly except on the open space sheet.
   const on = kind === 'open', fig = kind === 'figure';
-  D.water.forEach(x => paint(path(x.r), on ? 'waterOn' : 'water'));
+  D.water.forEach(x => paint(path(x.r), on && x.t.natural !== 'sea' ? 'waterOn' : 'water'));   // the sea keeps one tone on every sheet
   if (!fig) D.green.forEach(x => paint(path(x.r), on ? greenKey(x.kind) : 'greenQuiet'));
   if (on) D.squares.forEach(x => paint(path(x.r), 'square', `stroke="${st.soft}" stroke-width="0.12"`));
   // Streets.
@@ -406,7 +430,8 @@ function mapLayer(kind, X0, Y0, W, H, P) {
   const groups = new Map();
   D.buildings.forEach(b => {
     const key = kind === 'landuse' ? b.cls : kind === 'density' ? flKey(b.fl) : kind === 'figure' ? 'fig' : kind === 'landmarks' ? (b.t.heritage || b.t.historic ? 'heritage' : 'bldLight') : kind === 'transport' ? 'bldLight' : 'bld';
-    const ex = key === 'unknown' || key === 'flU' ? `stroke="${st.faint}" stroke-width="0.12"${st.outlined ? ' stroke-dasharray=".5 .4"' : ''}` : kind === 'density' && b.flEst ? `stroke="${st.ink}" stroke-width="0.1" stroke-dasharray=".45 .35"` : kind === 'landuse' || kind === 'density' || (st.outlined && !fig) ? edge : '';
+    // Solid edges only: Chrome's PDF writer turns every dash into geometry (a land-use sheet went from 3 MB to 120 KB without them).
+    const ex = key === 'unknown' || key === 'flU' ? `stroke="${st.faint}" stroke-width="0.12"` : kind === 'density' && b.flEst ? `stroke="${st.faint}" stroke-width="0.1"` : kind === 'density' ? `stroke="${st.ink}" stroke-width="0.14"` : kind === 'landuse' || kind === 'density' || (st.outlined && !fig) ? edge : '';
     const g = key + '\u0001' + ex; groups.set(g, (groups.get(g) || '') + path(orient(b.r)));
   });
   // One path per class keeps the PDF small: a hatch pattern is otherwise re-encoded for every building.
@@ -479,15 +504,16 @@ function legend(kind, x, y, P) {
     row(st.f.tree.map(([c, op = 1]) => `<circle cx="${x + 3}" cy="${yy + 1.8}" r="1.3" fill="${c}" fill-opacity="${op}" style="mix-blend-mode:multiply"/>`).join(''), 'Trees mapped', fmt(D.trees.length));
     yy += 3; head('Reading the map');
     const bArea = D.buildings.reduce((a, b) => a + b.area, 0);
-    o += para(x, yy, [`Built footprint covers ${fmt(100 * bArea / (D.w * D.h), 0)}% of the frame.`, `Green and squares cover ${fmt(100 * os.reduce((a, r) => a + (r.key === 'waterOn' ? 0 : r.a), 0) / (D.w * D.h), 1)}%.`, 'Trees are only those mapped in OSM.'], st);
+    o += para(x, yy, [`Built footprint covers ${fmt(100 * bArea / (D.w * D.h), 0)}% of the frame.`, `Green and squares cover ${fmt(100 * os.reduce((a, r) => a + (/^water/.test(r.key) ? 0 : r.a), 0) / (D.w * D.h), 1)}%.`, 'Trees are only those mapped in OSM.'], st);
   } else if (kind === 'density') {
     const ds = densityStats(); head('Height in floors'); sub('buildings · footprint');
     ds.rows.forEach(r => row(box(r.k), r.n, `${fmt(r.c)} · ${Math.round(100 * r.a / Math.max(1, ds.area))}%`));
-    if (ds.est) { row(`<rect x="${x}" y="${yy}" width="6" height="3.6" fill="none" stroke="${st.ink}" stroke-width="0.15" stroke-dasharray=".45 .35"/>`, 'Floors estimated (GHSL)', fmt(ds.est)); }
+    if (ds.est) { row(`<rect x="${x}" y="${yy}" width="6" height="3.6" fill="none" stroke="${st.faint}" stroke-width="0.15"/>`, 'Floors estimated (GHSL), grey edge', fmt(ds.est)); }
     yy += 3; head('Reading the map');
     o += para(x, yy, [`About ${fmt(ds.gfa / 1e4, 1)} ha of floor area on ${fmt(ds.area / 1e4, 1)} ha of footprint: a floor area ratio of ${fmt(ds.gfa / (D.w * D.h), 2)} over the whole frame and ${fmt(ds.gfa / Math.max(1, ds.area), 1)} floors on average.`,
-      ds.est ? `${Math.round(100 * ds.est / Math.max(1, D.buildings.length))}% of buildings have no floors in OSM; their floors are estimated from the GHSL average building height (EC JRC 2018) and drawn with a dashed edge.` : '',
-      ds.unk ? `${fmt(ds.unk)} buildings have no height at all: survey these.` : ''], st); yy = para.y;
+      ds.est ? `${Math.round(100 * ds.est / Math.max(1, D.buildings.length))}% of buildings have no floors in OSM; their floors are estimated from the GHSL average building height (EC JRC 2018) and drawn with a grey edge.` : '',
+      ds.unk ? `${fmt(ds.unk)} buildings have no height at all: survey these.` : '',
+      D.gap > 0.15 ? `OSM misses buildings here: ${Math.round(100 * D.gap)}% of the areas GHSL shows as built have no mapped footprint, so the floor area ratio is a minimum.` : ''], st); yy = para.y;
   } else if (kind === 'figure') {
     const area = D.buildings.reduce((a, b) => a + b.area, 0), med = D.buildings.map(b => b.area).sort((a, b) => a - b)[D.buildings.length >> 1] || 0;
     head('Figure-ground'); row(box('fig'), 'Buildings', fmt(D.buildings.length));
@@ -517,12 +543,12 @@ function densityStats() {
 // The atlas: all six analyses small on one A3, for a board overview.
 function atlasSvg() {
   const D = data, st = STYLES[style], P = 'um' + (++clipN) + '-', kinds = ['landuse', 'transport', 'open', 'landmarks', 'density', 'figure'];
-  const gw = 128, gh = gw * PAGE.mapH / PAGE.mapW, gx = 12, gy = 30, dx = 136, dy = gh + 17;
+  const gw = 120, gh = gw * PAGE.mapH / PAGE.mapW, gx = 16, gy = 30, dx = 136, dy = gh + 17;   // 300 → 120 mm: 2.5 × the sheet scale, a standard one
   let o = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${PAGE.w} ${PAGE.h}" font-family="Inter, Helvetica, Arial, sans-serif" fill="${st.ink}">`;
   o += `<rect width="${PAGE.w}" height="${PAGE.h}" fill="${st.paper}"/><defs>${patterns(P, st.ink)}</defs>`;
   o += `<text x="${PAGE.mx}" y="${PAGE.my + 4}" font-size="2.6" font-weight="600" fill="${st.accent}" letter-spacing=".5">00 — URBAN ANALYSIS</text>`;
   o += `<text x="${PAGE.mx}" y="${PAGE.my + 11.5}" font-size="7" font-weight="600" letter-spacing="-.1">${esc($('title').value.trim() || D.o.name || 'Analysis atlas')}</text>`;
-  o += `<text x="${PAGE.w - PAGE.mx}" y="${PAGE.my + 11.5}" font-size="3" text-anchor="end" fill="${st.soft}">Six readings of one frame · 1:${S * PAGE.mapW / gw | 0} · ${D.o.lat.toFixed(4)}° N ${D.o.lng.toFixed(4)}° E</text>`;
+  o += `<text x="${PAGE.w - PAGE.mx}" y="${PAGE.my + 11.5}" font-size="3" text-anchor="end" fill="${st.soft}">Six readings of one frame · 1:${fmt(S * PAGE.mapW / gw)} · ${D.o.lat.toFixed(4)}° N ${D.o.lng.toFixed(4)}° E</text>`;
   kinds.forEach((kd, i) => {
     const x = gx + (i % 3) * dx, y = gy + Math.floor(i / 3) * dy;
     o += `<text x="${x}" y="${y - 2}" font-size="3.2" font-weight="600">${NOS[kd]}  ${esc(TITLES[kd])}</text>`;
@@ -559,7 +585,7 @@ function openStats() {
   const out = groups.map(([n, key, re]) => ({ n, key, a: data.green.filter(g => re.test(g.kind || '')).reduce((a, g) => a + clippedArea(g.r), 0) })).filter(r => r.a > 0);
   const sq = data.squares.reduce((a, g) => a + clippedArea(g.r), 0); if (sq) out.push({ n: 'Squares, pedestrian areas', key: 'square', a: sq });
   const wa = data.water.filter(g => g.t.natural !== 'sea').reduce((a, g) => a + clippedArea(g.r), 0); if (wa) out.push({ n: 'Water', key: 'waterOn', a: wa });
-  const sa = data.water.filter(g => g.t.natural === 'sea').reduce((a, g) => a + clippedArea(g.r), 0); if (sa) out.push({ n: 'Sea', key: 'waterOn', a: sa });
+  const sa = data.water.filter(g => g.t.natural === 'sea').reduce((a, g) => a + clippedArea(g.r), 0); if (sa) out.push({ n: 'Sea', key: 'water', a: sa });
   return out;
 }
 

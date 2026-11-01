@@ -120,11 +120,13 @@ const runBtn = async (p, id = 'run') => { await p.click('#' + id); await p.waitF
     osm.elements.push({ type: 'way', id: 990002, tags: { amenity: 'theatre', name: 'Test Theatre' }, geometry: box(20, 20, 40, 40) });
     osm.elements.push({ type: 'way', id: 990003, tags: { leisure: 'park', name: 'Test Park' }, geometry: box(-80, -80, 0, 0) });   // 0.64 ha
     osm.elements.push({ type: 'way', id: 990004, tags: { tourism: 'attraction', name: 'feribot' }, geometry: box(60, 60, 70, 70) });
-    osm.elements.push({ type: 'way', id: 990005, tags: { building: 'yes', name: 'Wiki Hall', wikidata: 'Q1' }, geometry: box(-40, 50, -20, 70) });
+    osm.elements.push({ type: 'way', id: 990005, tags: { building: 'yes', historic: 'building', name: 'Wiki Hall', wikidata: 'Q1' }, geometry: box(-40, 50, -20, 70) });
+    osm.elements.push({ type: 'way', id: 990006, tags: { building: 'hotel', tourism: 'hotel', name: 'Wiki Hotel', wikidata: 'Q2' }, geometry: box(-40, 80, -20, 95) });
+    osm.elements.push({ type: 'relation', id: 990007, tags: { natural: 'strait', name: 'Test Boğazı', wikidata: 'Q3' }, members: [{ type: 'way', role: 'outer', geometry: box(-150, -150, -120, 150) }] });
     const p = await page(browser, 'tools/urban-map/index.html', { osm });
     await runBtn(p);
-    const u = await p.evaluate(() => ({ sea: data.water.filter(w => w.t.natural === 'sea').length, theatre: data.marks.some(m => m.name === 'Test Theatre'), park: data.marks.some(m => m.name === 'Test Park'), generic: data.marks.some(m => m.name === 'feribot'), wiki: data.marks.some(m => m.name === 'Wiki Hall' && m.rank > 2) }));
-    ok(u.park && u.wiki && !u.generic, `Urban Analysis Map: named parks and Wikidata places are landmarks, "feribot" is not (${JSON.stringify(u)})`);
+    const u = await p.evaluate(() => ({ sea: data.water.filter(w => w.t.natural === 'sea').length, theatre: data.marks.some(m => m.name === 'Test Theatre'), park: data.marks.some(m => m.name === 'Test Park'), generic: data.marks.some(m => m.name === 'feribot'), wiki: data.marks.some(m => m.name === 'Wiki Hall' && m.rank > 3), hotel: data.marks.some(m => /Wiki Hotel|Boğazı/.test(m.name)) }));
+    ok(u.park && u.wiki && !u.generic && !u.hotel, `Urban Analysis Map: named parks count, Wikidata lifts a historic place but not a hotel or a strait, "feribot" is dropped (${JSON.stringify(u)})`);
     ok(u.sea > 0, `Urban Analysis Map: sea drawn from the coastline (${u.sea} areas)`);
     ok(u.theatre, 'Urban Analysis Map: a named theatre counts as a landmark');
     await p.evaluate(() => { window.print = () => {}; }); await p.click('#printAll');
@@ -132,6 +134,10 @@ const runBtn = async (p, id = 'run') => { await p.click('#' + id); await p.waitF
     ok(dup === 0, `Urban Analysis Map: clip and pattern ids unique after print (${dup} duplicates)`);
     // Each building used to be its own hatched path; Chrome re-encodes the hatch per path and the ink density PDF reached 260 MB.
     const np = await p.evaluate(() => { style = 'ink'; return (sheetSvg('density').match(/<path/g) || []).length; });
+    // Ink sheets reached 30–90 MB as PDF (pattern fills re-tiled, every dash turned into geometry).
+    await p.evaluate(() => { style = 'ink'; window.print = () => {}; printSheets(['atlas', 'landuse', 'transport', 'open', 'landmarks', 'density', 'figure']); }); await p.emulateMedia({ media: 'print' });
+    const pdf = await p.pdf({ preferCSSPageSize: true, printBackground: true }); await p.emulateMedia({ media: 'screen' });
+    ok(pdf.length < 6e6, `Urban Analysis Map: all seven Ink sheets print to ${(pdf.length / 1e6).toFixed(1)} MB (limit 6 MB)`);
     ok(np < 120, `Urban Analysis Map: buildings drawn as one path per class (${np} paths for 170 buildings)`);
     ok(!p.errs.length, 'urban map: no errors');
     await p.context().close();

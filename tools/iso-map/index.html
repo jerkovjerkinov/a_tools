@@ -508,10 +508,10 @@ function drawing() {
     const gs = hasT ? b.outer.map(p => gz(p[0], p[1])) : [0]; b.z0 = Math.min(...gs); b.h += (Math.max(...gs) - b.z0) / 2; });
   // A dome part's drum starts at the roof it stands on (it used to rise from the ground as a full-height cylinder).
   D.blds.forEach(b => { if (b.base && !num(b.t.min_height) && !num(b.t['building:min_level'])) b.m = Math.max(b.m, Math.min(b.base.z0 + b.base.h - b.z0, b.h - 4)); });
-  // Minarets without a height scale with their mosque: 1.45 × its top, at least 45 m (Selimiye about 67 m, real 71 m).
+  // Minarets without a height scale with their mosque: 1.6 × its top, at least 45 m (Selimiye about 71 m, as built).
   D.spires.filter(sp => sp.auto).forEach(sp => {
     const tops = D.blds.filter(b => (b.mosque || (b.parent && (b.parent.t.building === 'mosque' || b.parent.t.religion === 'muslim')) || b.t.building === 'mosque') && Math.hypot(b.c[0] - sp.p[0], b.c[1] - sp.p[1]) < 90).map(b => b.h);
-    const H = Math.max(45, 1.45 * Math.max(0, ...tops)); sp.cone = Math.max(4, H * 0.15); sp.h = H - sp.cone;
+    const H = Math.max(45, 1.6 * Math.max(0, ...tops)); sp.cone = Math.max(4, H * 0.15); sp.h = H - sp.cone;
   });
   const seaZ = hasT ? Math.max(-6, -D.terr.min * ex) : 0, tMax = hasT ? D.terr.range * ex : 0;
   const topZ = Math.max(tMax + 15, Math.min(tMax + 80, Math.max(20, ...D.blds.map(b => b.z0 + b.h))));
