@@ -243,10 +243,10 @@ function sparql(f) {
   if (f.style) w.push(`?b wdt:P149 wd:${f.style.id} .`);
   if (f.country) w.push(`?b wdt:P17 wd:${f.country.id} .`);
   if (f.near) w.push(`SERVICE wikibase:around { ?b wdt:P625 ?loc . bd:serviceParam wikibase:center "Point(${f.near.lng.toFixed(5)} ${f.near.lat.toFixed(5)})"^^geo:wktLiteral . bd:serviceParam wikibase:radius "${f.near.km}" . }`);
-  if (f.from != null || f.to != null) {
+  if (f.from != null || f.to != null) {   // the earliest recorded year must fall in range
     w.push('?b wdt:P571 ?inc0 .');
-    if (f.from != null) w.push(`FILTER(YEAR(?inc0) >= ${Math.round(f.from)})`);
     if (f.to != null) w.push(`FILTER(YEAR(?inc0) <= ${Math.round(f.to)})`);
+    if (f.from != null) w.push(`FILTER NOT EXISTS { ?b wdt:P571 ?incE . FILTER(YEAR(?incE) < ${Math.round(f.from)}) }`);
   }
   if (f.photo) w.push('?b wdt:P18 ?anyImg .');
   return `SELECT ?b ?sl (SAMPLE(?lab) AS ?name) (SAMPLE(?labm) AS ?nameMul) (SAMPLE(?desc) AS ?d) (SAMPLE(?img) AS ?image) (SAMPLE(?co) AS ?coord)
@@ -298,11 +298,11 @@ async function run() {
     const j = await ATools.fetchJson(WDQS + '?' + new URLSearchParams({ query: sparql(f), format: 'json' }), { headers: { Accept: 'application/sparql-results+json' } }, 60000);
     items = (j.results && j.results.bindings || []).map(parseRow);
     items.forEach(it => it.dist = km(site, it));
-    $('status').textContent = items.length ? `${items.length} found${items.length === LIMIT ? ' (the best known ' + LIMIT + ')' : ''}.` : 'Nothing found. Loosen a filter: wider years, any type, or allow results without a photo.';
+    $('status').textContent = items.length ? `${items.length} found${items.length === LIMIT ? ' (the best known ' + LIMIT + ')' : ''}.` : 'Nothing found. Loosen a filter: wider years or distance, any type, or untick “Only with a photo” and “Only with a known architect”.';
     ATools.track && ATools.track('precedents/search');
   } catch (e) {
     items = [];
-    $('status').textContent = ATools.errorText(e, 'results from Wikidata') + ' Fewer filters at once can help.';
+    $('status').textContent = ATools.errorText(e, 'results from Wikidata') + ' Wikidata may be busy: try again, or narrow the search with a type, a country or a shorter period.';
   }
   $('run').disabled = false;
   render();
