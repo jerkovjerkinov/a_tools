@@ -143,6 +143,51 @@ const runBtn = async (p, id = 'run') => { await p.click('#' + id); await p.waitF
     await p.context().close();
   }
 
+  // 6. Terrain Model: served over a test origin (ES modules do not load from file://), with the DEM tile,
+  //    three.js and rhino3dm from disk and the dense OSM fixture; satellite, GHSL and water history offline.
+  {
+    const NM = path.join(__dirname, 'node_modules'), REPO = path.join(__dirname, '..'), DEM = path.join(__dirname, 'fixtures', 'terrarium.png');
+    const type = f => ({ '.js': 'application/javascript', '.mjs': 'application/javascript', '.css': 'text/css', '.html': 'text/html', '.wasm': 'application/wasm', '.png': 'image/png', '.svg': 'image/svg+xml', '.json': 'application/json' })[path.extname(f)] || 'application/octet-stream';
+    const file = (r, f) => fs.existsSync(f) ? r.fulfill({ path: f, contentType: type(f) }) : r.fulfill({ status: 404, body: '' });
+    const ctx = await browser.newContext({ viewport: { width: 1366, height: 900 }, acceptDownloads: true });
+    await ctx.addInitScript(s => localStorage.setItem('atools.site', JSON.stringify(s)), { lat: lat0, lng: lng0, name: 'Kadıköy, İstanbul' });
+    const p = await ctx.newPage(); p.errs = [];
+    p.on('pageerror', e => p.errs.push(e.message));
+    p.on('console', m => m.type() === 'error' && !/Failed to load resource|ERR_FAILED|status of 404/.test(m.text()) && p.errs.push(m.text()));
+    const osm = F.osm();
+    await p.route('**/*', r => {
+      const u = r.request().url(), q = u.split('?')[0];
+      if (q.startsWith('https://atools.test/')) return file(r, path.join(REPO, decodeURIComponent(q.slice(20))));
+      let m;
+      if ((m = q.match(/npm\/three@0\.170\.0\/(.*)$/))) return file(r, path.join(NM, 'three', m[1]));
+      if ((m = q.match(/npm\/rhino3dm@8\.17\.0\/(.*)$/))) return file(r, path.join(NM, 'rhino3dm', m[1]));
+      if (u.includes('leaflet.js')) return r.fulfill({ path: LEAF + '/leaflet.js' });
+      if (u.includes('leaflet.css')) return r.fulfill({ path: LEAF + '/leaflet.css' });
+      if (u.includes('earcut')) return r.fulfill({ path: EARCUT, contentType: 'application/javascript' });
+      if (u.includes('/terrarium/')) return r.fulfill({ path: DEM, contentType: 'image/png' });
+      if (/overpass|interpreter/.test(u)) return json(r, osm);
+      return r.abort();   // Mapterhorn, Sentinel-2, JRC, GHSL, map tiles: offline
+    });
+    await p.goto('https://atools.test/tools/terrain-model/index.html'); await p.waitForTimeout(500);
+    await p.evaluate(() => { document.querySelector('#size button[data-v="500"]').click(); document.querySelector('#detail button[data-v="201"]').click(); document.getElementById('build').click(); });
+    await p.waitForFunction(() => /Model ready|could not|failed/i.test(document.getElementById('status').textContent), null, { timeout: 120000 }).catch(e => p.errs.push('build: ' + e.message));
+    const st = (await p.textContent('#status')).trim();
+    const tm = await p.evaluate(() => { const M = TM.M; return M && { n: M.T.n, src: M.T.src, relief: M.T.max - M.T.min, buildings: M.buildings.length, trees: M.trees.length, roads: M.lay.roads.length, streams: M.A.streams.length }; });
+    ok(/Model ready/.test(st) && tm && tm.n === 201 && tm.relief > 1, `Terrain Model builds from the fallback DEM tiles: ${st} ${JSON.stringify(tm)}`);
+    ok(tm && tm.buildings > 20 && tm.roads > 0, `Terrain Model: buildings and roads from OSM (${tm && tm.buildings} buildings, ${tm && tm.roads} roads)`);
+    const sizes = {};
+    for (const k of ['3dm', 'dxf', 'obj', 'stl', 'svg', 'tif', 'geojson', 'lsvg']) {
+      try { const [dl] = await Promise.all([p.waitForEvent('download', { timeout: 60000 }), p.evaluate(x => document.querySelector(`[data-x="${x}"]`).click(), k)]); sizes[k] = fs.statSync(await dl.path()).size; } catch (e) { sizes[k] = 0; }
+    }
+    const again = await Promise.all([p.waitForEvent('download', { timeout: 60000 }), p.evaluate(() => document.querySelector('[data-x="3dm"]').click())]).then(([d]) => d.path()).then(f => fs.statSync(f).size).catch(() => 0);
+    ok(again === sizes['3dm'], `Terrain Model: a second .3dm export matches the first (${again} bytes; rhino3dm used to corrupt its heap on block definitions)`);
+    ok(Object.values(sizes).every(v => v > 500), `Terrain Model: every download is made (${Object.entries(sizes).map(([k, v]) => k + ' ' + (v / 1e3).toFixed(0) + ' kB').join(', ')})`);
+    for (const v of ['axo', 'plan', 'section', 'persp']) await p.evaluate(x => document.querySelector(`#view button[data-v="${x}"]`).click(), v);
+    for (const v of ['atlas', 'ink', 'sat', 'clay']) await p.evaluate(x => document.querySelector(`#style button[data-v="${x}"]`).click(), v);
+    ok(!p.errs.length, `Terrain Model: views and styles switch without errors ${p.errs.length ? JSON.stringify(p.errs.slice(0, 2)) : ''}`);
+    await ctx.close();
+  }
+
   await browser.close();
   console.log(fails ? `\n${fails} failed` : '\nall browser checks passed'); process.exit(fails ? 1 : 0);
 })();

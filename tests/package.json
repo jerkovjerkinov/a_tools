@@ -3,5 +3,5 @@
   "private": true,
   "description": "Regression checks for a_tools. All network calls are mocked.",
   "scripts": { "test": "node unit.js && node browser.js" },
-  "devDependencies": { "earcut": "2.2.4", "leaflet": "1.9.4", "playwright": "1.49.1" }
+  "devDependencies": { "earcut": "2.2.4", "leaflet": "1.9.4", "playwright": "1.49.1", "rhino3dm": "8.17.0", "three": "0.170.0" }
 }
