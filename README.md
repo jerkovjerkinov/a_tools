@@ -92,7 +92,16 @@ A 500 m to 5 km square around the site turned into a 3D model in the browser, fr
 - **Vegetation and imagery**: the least cloudy recent Sentinel-2 L2A scene (Element 84 Earth Search STAC, with an S3 listing fallback by MGRS tile), read straight from its cloud-optimised GeoTIFFs with range requests (`assets/lib/cog.js`: TIFF/BigTIFF, deflate, predictor 2). Red and near-infrared give NDVI; the scene classification masks cloud; the true-colour image drapes the Satellite style. Leaf-off winter scenes are avoided.
 - **Water history**: JRC Global Surface Water occurrence 1984–2021.
 
-The ground is then shaped like a site model: roads get level benches across the slope (a running mean along the centre line), mapped streams get beds that never rise downstream, and each building sits on a pad at the median ground under its footprint. Slope (Horn), aspect, hillshade and hydrology (priority-flood fill, D8 flow accumulation, flow lines above 2 ha, topographic wetness) are computed on the natural ground and summarised in a site report (relief, slope classes, aspect shares).
+The ground is then shaped like a site model: roads get level benches across the slope (a running mean along the centre line), mapped streams get beds that never rise downstream, and each building sits on a pad at the median ground under its footprint. On the natural ground (sea flattened to 0 m) the tool computes:
+
+- slope (Horn), aspect, hillshade
+- roughness (TRI, against the ground 10 m around), landform position (TPI against a window a tenth of the site wide, 30–150 m, sorted into Weiss's valley / lower slope / flat / mid-slope / upper slope / ridge classes) and curvature (Laplacian over 10 m)
+- hydrology: priority-flood fill, D8 flow accumulation, flow lines above 2 ha, topographic wetness
+- flood screening: height above the nearest drainage (HAND), where drainage is mapped water (rivers, lakes, sea) or a flow line draining at least 25 ha (or 1/16 of a large site); ground that drains out of the square first has no value
+- catchments: one per stream segment between confluences, per outlet on the edge and per outlet into the sea, small ones merged downstream until each is at least 4% of the land
+- sea level rise: land at or below a raised sea and connected to it (flood fill from the sea), for the IPCC AR6 WGI Table 9.9 global means against 1995–2014 (2050 and 2100: SSP1-2.6 median, SSP2-4.5 median, SSP5-8.5 upper likely) or a fixed +1 to +5 m
+
+These are shown as maps on the ground with legends and summarised in a site report (relief, slope classes, aspect shares, low ground near water, catchments or land lost to the sea by 2100).
 
 Trees: mapped trees and rows from OSM, woods, orchards, parks and scrub filled at their typical spacing, plus trees found in the Sentinel-2 vegetation index where nothing is mapped (seeded, so a rebuild is the same).
 
@@ -101,12 +110,12 @@ View: perspective, axonometric, plan and a moving section (N–S or E–W) with 
 Downloads:
 - **3D**: Rhino `.3dm` (rhino3dm.js, metres, layers and sub-layers, trees as block instances), DXF R12 (polyface meshes, layers, tree blocks), OBJ, and a closed STL for 3D printing at a chosen scale. Local coordinates or UTM; lines draped or flat; trees as 3D blocks, points, or left out.
 - **Drawing**: layered plan SVG (contours with labels, roads, water, buildings, trees, title block), A-size PDF at a true scale, view PNG and a 4096 px plan PNG.
-- **GIS**: GeoTIFF elevation and slope (float32, EPSG:4326), GeoJSON of all layers, KML.
+- **GIS**: GeoTIFF elevation, slope and height above water (float32, EPSG:4326); GeoJSON of all layers; zipped ESRI shapefiles of every layer (WGS 84, UTF-8 attributes; `assets/lib/gisfiles.js`), including flood bands (1, 2, 5 m above water), catchments and sea level rise; Google Earth KMZ with the plan as a ground overlay, buildings extruded to their heights and the analysis outlines; KML outline. The 3D files carry the 2 m flood band, catchments and 2100 sea level rise as closed curves on Analysis layers.
 - **Laser**: contour plates at the chosen scale, sheet thickness and height exaggeration (at most 150), packed onto sheets, each with a numbered label and a score line where the next plate sits; SVG or DXF.
 
-Libraries: `assets/lib/terrain.js` (DEM loading, shaping, contours, plates, analysis), `land.js` (OSM parsing, land cover raster, tree placement), `sentinel.js`, `cog.js`, `pmtiles.js` (PMTiles v3 and vector tile decoding), `overture.js`, `utm.js` (UTM and MGRS) and `export3d.js` (3dm, DXF, OBJ, GeoTIFF and laser writers).
+Libraries: `assets/lib/terrain.js` (DEM loading, shaping, contours, plates, analysis), `land.js` (OSM parsing, land cover raster, tree placement), `sentinel.js`, `cog.js`, `pmtiles.js` (PMTiles v3 and vector tile decoding), `overture.js`, `utm.js` (UTM and MGRS), `export3d.js` (3dm, DXF, OBJ, GeoTIFF and laser writers) and `gisfiles.js` (ZIP, shapefile and dBASE writers).
 
-Data credits: Mapterhorn (see its attribution page; Copernicus DEM © DLR/Airbus, ESA), AWS Terrain Tiles (Mapzen, various sources), © OpenStreetMap contributors (ODbL), Overture Maps Foundation (ODbL / CDLA Permissive 2.0; includes Microsoft and Google building footprints), Copernicus Sentinel-2 data (modified), JRC Global Surface Water (Pekel et al. 2016, © EC JRC/Google), GHSL (EC JRC, CC BY 4.0).
+Data credits: Mapterhorn (see its attribution page; Copernicus DEM © DLR/Airbus, ESA), AWS Terrain Tiles (Mapzen, various sources), © OpenStreetMap contributors (ODbL), Overture Maps Foundation (ODbL / CDLA Permissive 2.0; includes Microsoft and Google building footprints), Copernicus Sentinel-2 data (modified), JRC Global Surface Water (Pekel et al. 2016, © EC JRC/Google), GHSL (EC JRC, CC BY 4.0), sea level projections IPCC AR6 WGI (Fox-Kemper et al. 2021, Table 9.9).
 
 ### Programme & Adjacency
 

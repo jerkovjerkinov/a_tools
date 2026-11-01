@@ -66,10 +66,14 @@
       </div>
       <div class="grid-2">
         <div class="field"><label for="mapOn">Map on the ground</label>
-          <select id="mapOn"><option value="">None</option><option value="elev">Elevation</option><option value="slope">Slope</option><option value="aspect">Aspect</option><option value="wet">Wetness</option><option value="hist">Water history</option><option value="ndvi">Vegetation (NDVI)</option></select></div>
+          <select id="mapOn"><option value="">None</option><option value="elev">Elevation</option><option value="slope">Slope</option><option value="aspect">Aspect</option><option value="wet">Wetness</option><option value="hist">Water history</option><option value="ndvi">Vegetation (NDVI)</option>
+            <optgroup label="More terrain"><option value="tri">Roughness</option><option value="tpi">Ridges and valleys</option><option value="curv">Curvature</option></optgroup>
+            <optgroup label="Water"><option value="flood">Flood: height above water</option><option value="basins">Catchments</option><option value="slr">Sea level rise</option></optgroup></select></div>
         <div class="field"><label for="cInt">Contours every</label>
           <select id="cInt"><option value="auto">Auto</option><option>0.5</option><option>1</option><option>2</option><option>5</option><option>10</option><option>20</option><option>50</option><option value="0">Off</option></select></div>
       </div>
+      <div class="field" id="slrBox" hidden><label for="slrSel">Sea level</label>
+        <select id="slrSel"><option value="2050">2050 · IPCC AR6, three scenarios</option><option value="2100" selected>2100 · IPCC AR6, three scenarios</option><option value="c1">+1 m</option><option value="c2">+2 m</option><option value="c3">+3 m</option><option value="c5">+5 m</option></select></div>
       <div class="field"><label for="vx">Vertical exaggeration <span class="unit" id="vxV">×1.0</span></label><input id="vx" type="range" min="1" max="4" step="0.25" value="1"></div>
       <div class="checks">
         <label><input type="checkbox" id="sBuild" checked>Buildings</label>
@@ -105,7 +109,7 @@
           <div class="field"><label for="xTree">Trees</label><select id="xTree"><option value="mesh">3D</option><option value="point">Points</option><option value="off">Leave out</option></select></div>
           <div class="field"><label for="xStl">.stl scale</label><select id="xStl"><option value="1000">1:1000</option><option value="2000">1:2000</option><option value="5000" selected>1:5000</option><option value="10000">1:10000</option><option value="25000">1:25000</option></select></div>
         </div>
-        <p class="hint">Metres, heights above sea level, north is +Y. Layers: Terrain, Contours, Water, Roads, Buildings, Vegetation. The .stl is a closed block in millimetres at the chosen scale, ready to slice.</p>
+        <p class="hint">Metres, heights above sea level, north is +Y. Layers: Terrain, Contours, Water, Roads, Buildings, Vegetation, Analysis (flood band under 2 m above water, catchments, sea level rise by 2100). The .stl is a closed block in millimetres at the chosen scale, ready to slice.</p>
       </div>
 
       <div class="dl" data-tab="draw" hidden>
@@ -123,9 +127,11 @@
       <div class="dl" data-tab="gis" hidden>
         <div class="exports">
           <button class="btn" data-x="tif" disabled>Elevation .tif</button><button class="btn" data-x="tifslope" disabled>Slope .tif</button>
-          <button class="btn" data-x="geojson" disabled>Layers .geojson</button><button class="btn" data-x="kml" disabled>Outline .kml</button>
+          <button class="btn" data-x="tifhand" disabled>Height above water .tif</button><button class="btn" data-x="geojson" disabled>Layers .geojson</button>
+          <button class="btn" data-x="shp" disabled>Shapefiles .zip</button><button class="btn" data-x="kmz" disabled>Google Earth .kmz</button>
+          <button class="btn" data-x="kml" disabled>Outline .kml</button>
         </div>
-        <p class="hint">GeoTIFF in WGS 84 (EPSG:4326), metres above sea level and slope in degrees. GeoJSON holds contours, roads, water, buildings with heights and trees, with attributes.</p>
+        <p class="hint">GeoTIFF in WGS 84 (EPSG:4326): metres above sea level, slope in degrees, height above the nearest stream or water in metres. GeoJSON and the shapefiles hold contours, roads, water, land cover, buildings with heights, trees, flow lines, flood bands (1, 2, 5 m), catchments and sea level rise, with attributes. The .kmz shows the plan, buildings in 3D and the analysis outlines in Google Earth.</p>
       </div>
 
       <div class="dl" data-tab="laser" hidden>
@@ -141,7 +147,7 @@
         </div>
         <p class="hint">Red cuts, blue scores the outline of the next plate for gluing in register, black engraves the plate number. Check the files before cutting.</p>
       </div>
-      <p class="hint" style="margin-top:12px">Data: elevation © Mapterhorn (Copernicus GLO-30 and national lidar) or Terrarium tiles (AWS); © OpenStreetMap contributors; heights GHS-BUILT-H R2023A, EC JRC; Copernicus Sentinel-2 via Earth Search; water history JRC Global Surface Water. Trees inside woods and from satellite are placed by rule, not measured.</p>
+      <p class="hint" style="margin-top:12px">Data: elevation © Mapterhorn (Copernicus GLO-30 and national lidar) or Terrarium tiles (AWS); © OpenStreetMap contributors; heights GHS-BUILT-H R2023A, EC JRC; Copernicus Sentinel-2 via Earth Search; water history JRC Global Surface Water; sea level rise IPCC AR6 WGI Table 9.9. Trees inside woods and from satellite are placed by rule, not measured.</p>
     </div>
   </aside>
 
@@ -180,6 +186,7 @@
 <script src="../../assets/lib/pmtiles.js"></script>
 <script src="../../assets/lib/overture.js"></script>
 <script src="../../assets/lib/export3d.js"></script>
+<script src="../../assets/lib/gisfiles.js"></script>
 <script type="importmap">{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/" } }</script>
 <script type="module" src="app.js"></script>
 </body>

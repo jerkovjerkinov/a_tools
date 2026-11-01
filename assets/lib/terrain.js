@@ -305,14 +305,18 @@ function interiorPoint(r) {
 }
 
 // ---------- Analysis ----------
-function analyse(T, { streamArea } = {}) {
-  const n = T.n, s = T.step, z = T.z, N = n * n, E = (i, j) => z[Math.max(0, Math.min(n - 1, j)) * n + Math.max(0, Math.min(n - 1, i))];
+// water: optional 0/1 mask of mapped water (rivers, lakes, sea) that counts as drainage for the flood map, with flow
+// lines draining at least floodArea m²;
+// sea: optional 0/1 mask of the sea, where catchments end.
+function analyse(T, { streamArea, floodArea, water = null, sea = null } = {}) {
+  const n = T.n, s = T.step, z = T.z, N = n * n;
   const slope = new Float32Array(N), aspect = new Float32Array(N), shade = new Float32Array(N);
   const az = 315 * rad, alt = 45 * rad;
   for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) {
-    // Horn's method; y grows north.
-    const gx = ((E(i + 1, j + 1) + 2 * E(i + 1, j) + E(i + 1, j - 1)) - (E(i - 1, j + 1) + 2 * E(i - 1, j) + E(i - 1, j - 1))) / (8 * s);
-    const gy = ((E(i - 1, j + 1) + 2 * E(i, j + 1) + E(i + 1, j + 1)) - (E(i - 1, j - 1) + 2 * E(i, j - 1) + E(i + 1, j - 1))) / (8 * s);
+    // Horn's method; y grows north (edges repeat the outer row).
+    const jn = Math.min(n - 1, j + 1) * n, js = Math.max(0, j - 1) * n, jc = j * n, ie = Math.min(n - 1, i + 1), iw = Math.max(0, i - 1);
+    const gx = ((z[jn + ie] + 2 * z[jc + ie] + z[js + ie]) - (z[jn + iw] + 2 * z[jc + iw] + z[js + iw])) / (8 * s);
+    const gy = ((z[jn + iw] + 2 * z[jn + i] + z[jn + ie]) - (z[js + iw] + 2 * z[js + i] + z[js + ie])) / (8 * s);
     const k = j * n + i, g = Math.hypot(gx, gy);
     slope[k] = Math.atan(g) / rad;
     aspect[k] = g < 1e-4 ? -1 : (Math.atan2(-gx, -gy) / rad + 360) % 360;
@@ -365,7 +369,73 @@ function analyse(T, { streamArea } = {}) {
     while (to[c] >= 0 && !visited[c]) { visited[c] = 1; c = to[c]; pts.push(P(c)); }
     if (pts.length > 2) streams.push({ pts, area: acc[c] * s * s });
   }
-  return { slope, aspect, shade, acc, twi, streams, filled: zf };
+  // Roughness (TRI) and curvature compare each node with neighbours about 10 m away; TPI with the mean of a
+  // window about a tenth of the site wide (30–150 m), as in Weiss's landform classes.
+  const h = Math.max(1, Math.round(10 / s)), hs = h * s, tri = new Float32Array(N), curv = new Float32Array(N), tpi = new Float32Array(N);
+  for (let j = 0; j < n; j++) {
+    const jd = Math.max(0, j - h) * n, ju = Math.min(n - 1, j + h) * n;
+    for (let i = 0; i < n; i++) {
+      const k = j * n + i, c = z[k], il = Math.max(0, i - h), ir = Math.min(n - 1, i + h);
+      const w = z[j * n + il], e = z[j * n + ir], sN = z[ju + i], sS = z[jd + i];
+      tri[k] = (Math.abs(w - c) + Math.abs(e - c) + Math.abs(sN - c) + Math.abs(sS - c) + Math.abs(z[ju + il] - c) + Math.abs(z[ju + ir] - c) + Math.abs(z[jd + il] - c) + Math.abs(z[jd + ir] - c)) / 8;
+      curv[k] = (w + e + sN + sS - 4 * c) / (hs * hs) * 100;   // 1/100 m: + hollows, − crests
+    }
+  }
+  const R = Math.max(2, Math.round(Math.min(150, Math.max(30, T.half / 10)) / s)), n1 = n + 1, sat = new Float64Array(n1 * n1);
+  for (let j = 0; j < n; j++) { let row = 0; for (let i = 0; i < n; i++) { row += z[j * n + i]; sat[(j + 1) * n1 + i + 1] = sat[j * n1 + i + 1] + row; } }
+  let tSum = 0, tSq = 0;
+  for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) {
+    const i0 = Math.max(0, i - R), i1 = Math.min(n, i + R + 1), j0 = Math.max(0, j - R), j1 = Math.min(n, j + R + 1);
+    const mean = (sat[j1 * n1 + i1] - sat[j0 * n1 + i1] - sat[j1 * n1 + i0] + sat[j0 * n1 + i0]) / ((i1 - i0) * (j1 - j0));
+    const v = z[j * n + i] - mean; tpi[j * n + i] = v; tSum += v; tSq += v * v;
+  }
+  const tpiSd = Math.sqrt(Math.max(0, tSq / N - (tSum / N) ** 2));
+  // Height above the nearest drainage (HAND): follow the flow down to the first mapped water or a flow line big
+  // enough to flood (at least 25 ha, or 1/16 of a large site). Ground that drains out of the square first has no
+  // value (NaN). Cells are visited lowest first (the flood order), so the cell downstream is always done first.
+  const thrF = Math.max(floodArea || Math.max(25e4, 4 * T.half * T.half / 16), thr * s * s) / (s * s);
+  const isD = k => acc[k] >= thrF || (water && water[k]) || (sea && sea[k]);
+  const baseZ = new Float32Array(N), hand = new Float32Array(N);
+  for (let m = 0; m < N; m++) { const k = order[m]; baseZ[k] = isD(k) ? z[k] : to[k] < 0 ? NaN : baseZ[to[k]]; hand[k] = Math.max(0, z[k] - baseZ[k]); }
+  // Catchments: every stream segment between confluences, the edge of the square or the sea gets its own; small
+  // ones join the catchment downstream, until each is at least 4% of the land.
+  const nUp = new Uint8Array(N);
+  for (let k = 0; k < N; k++) if (isS(k) && to[k] >= 0) nUp[to[k]]++;
+  const outlet = new Int32Array(N).fill(-1);
+  for (let m = 0; m < N; m++) {
+    const k = order[m]; if (sea && sea[k]) continue;
+    outlet[k] = to[k] < 0 || (sea && sea[to[k]]) || (isS(k) && nUp[to[k]] > 1) ? k : outlet[to[k]];
+  }
+  const cnt = new Map(); let land = 0;
+  for (let k = 0; k < N; k++) if (outlet[k] >= 0) { land++; cnt.set(outlet[k], (cnt.get(outlet[k]) || 0) + 1); }
+  const minA = Math.max(thr, 0.04 * land), parent = new Map();
+  const pos = new Int32Array(N); for (let m = 0; m < N; m++) pos[order[m]] = m;
+  const outs = [...cnt.keys()].sort((a, b) => pos[b] - pos[a]);   // upstream first
+  const root = o => { while (parent.has(o)) o = parent.get(o); return o; };
+  for (const o of outs) {
+    const a = cnt.get(o); if (a >= minA || to[o] < 0 || (sea && sea[to[o]])) continue;
+    const r = root(outlet[to[o]]); if (r === o) continue;
+    parent.set(o, r); cnt.set(r, cnt.get(r) + a); cnt.set(o, 0);
+  }
+  const ids = new Map(), basins = [];
+  [...cnt.entries()].filter(([o, a]) => !parent.has(o) && a >= minA).sort((a, b) => b[1] - a[1]).forEach(([o, a], q) => { ids.set(o, q + 1); basins.push({ id: q + 1, area: a * s * s, outlet: P(o) }); });
+  const basin = new Int16Array(N);   // 0: a strip along the edge too small to count, −1: sea
+  for (let k = 0; k < N; k++) basin[k] = outlet[k] < 0 ? -1 : ids.get(root(outlet[k])) || 0;
+  return { slope, aspect, shade, acc, twi, streams, filled: zf, tri, tpi, tpiSd, tpiRadius: R * s, curv, hand, basin, basins };
+}
+// Land flooded when the sea rises by `rise` metres: ground at or below that level and connected to the sea.
+function inundate(T, sea, rise) {
+  const n = T.n, N = n * n, out = new Uint8Array(N), q = new Int32Array(N); let qh = 0, qt = 0;
+  for (let k = 0; k < N; k++) if (sea[k]) { out[k] = 2; q[qt++] = k; }
+  while (qh < qt) {
+    const c = q[qh++], ci = c % n, cj = (c - ci) / n;
+    for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) {
+      const i = ci + di, j = cj + dj; if (i < 0 || j < 0 || i >= n || j >= n) continue;
+      const k = j * n + i; if (out[k] || T.z[k] > rise) continue; out[k] = 1; q[qt++] = k;
+    }
+  }
+  for (let k = 0; k < N; k++) if (out[k] === 2) out[k] = 0;   // 1 = flooded land
+  return out;
 }
 class Heap {
   constructor(key) { this.k = key; this.a = []; }
@@ -390,5 +460,5 @@ function report(T, A) {
   return { min: T.min, max: T.max, mean: sum / N, relief: T.max - T.min, meanSlope: sl / N, classes: cls.map(c => c / N), aspects: asp.map(c => c / N) };
 }
 
-window.ATTerrain = { load, at, pads, benches, channels, resample, contours, isolines, plateRegions, analyse, report, densify, inside, signedArea, interiorPoint, stats, tx, ty, fetchTile };
+window.ATTerrain = { load, at, pads, benches, channels, resample, contours, isolines, plateRegions, analyse, inundate, report, densify, inside, signedArea, interiorPoint, stats, tx, ty, fetchTile };
 })();

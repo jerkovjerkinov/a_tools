@@ -48,15 +48,18 @@ async function write3dm(X) {
     for (let i = 0; i < ix.length; i += 3) m.faces().addTriFace(ix[i], ix[i + 1], ix[i + 2]);
     m.normals().computeNormals(); m.compact(); return m;
   };
-  X.meshes.forEach(m => { if (m.idx.length) doc.objects().add(mesh(m.pos, m.idx, X.P), attr(m.layer, m.name)); });
+  // The document keeps its own copies, so every temporary wasm object is freed once added: tens of thousands of
+  // leaked attributes and transforms (one per tree) used to exhaust the wasm heap and crash the page on large sites.
+  const add = (geo, a) => { doc.objects().add(geo, a); geo.delete(); a.delete(); };
+  X.meshes.forEach(m => { if (m.idx.length) add(mesh(m.pos, m.idx, X.P), attr(m.layer, m.name)); });
   X.lines.forEach(l => {
     if (l.pts.length < 2) return;
     const pl = new rh.Polyline(l.pts.length + 1);
     l.pts.forEach(p => { const q = X.P(p[0], p[1], p[2]); pl.add(q[0], q[1], q[2]); });
     if (l.closed) { const q = X.P(...l.pts[0]); pl.add(q[0], q[1], q[2]); }
-    doc.objects().add(pl.toPolylineCurve(), attr(l.layer, l.name));
+    add(pl.toPolylineCurve(), attr(l.layer, l.name)); pl.delete();
   });
-  X.points.forEach(pt => { const q = X.P(...pt.p); doc.objects().addPoint(q, attr(pt.layer, pt.name)); });
+  X.points.forEach(pt => { const q = X.P(...pt.p), a = attr(pt.layer, pt.name); doc.objects().addPoint(q, a); a.delete(); });
   const ids = {};
   Object.entries(X.blocks || {}).forEach(([name, b]) => {
     doc.instanceDefinitions().add(name, 'a_tools ' + name.toLowerCase(), '', '', [0, 0, 0], [mesh(b.pos, b.idx, (x, y, z) => [x, y, z])], [attr(b.layer)]);
@@ -65,7 +68,7 @@ async function write3dm(X) {
   (X.inserts || []).forEach(t => {
     const q = X.P(...t.p), xf = rh.Transform.identity();
     xf.m00 = t.s[0]; xf.m11 = t.s[1]; xf.m22 = t.s[2]; xf.m03 = q[0]; xf.m13 = q[1]; xf.m23 = q[2];
-    doc.objects().add(new rh.InstanceReference(ids[t.block], xf), attr(t.layer));
+    add(new rh.InstanceReference(ids[t.block], xf), attr(t.layer)); xf.delete();
   });
   doc.settings().modelUnitSystem = rh.UnitSystem.Meters; doc.settings().modelBasepoint = [0, 0, 0];
   return doc.toByteArray();

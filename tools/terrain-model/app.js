@@ -118,13 +118,13 @@ async function build() {
   if (!want.r) { lay.roads = []; lay.rails = []; }
   if (!want.w) { lay.water = []; lay.waterways = []; lay.sea = []; }
   if (!want.t) { lay.trees = []; lay.rows = []; }
-  const T = { ...T0, z: Float32Array.from(T0.z) };
-  // Sea: flat at sea level (some elevation tiles carry the sea floor).
-  if (lay.sea.length) for (let jj = 0; jj < T.n; jj++) for (let i = 0; i < T.n; i++) {
-    const p = [-half + i * T.step, -half + jj * T.step];
-    if (lay.sea.some(r => ATLand.inside(p, r.outer) && !r.holes.some(h => ATLand.inside(p, h)))) T.z[jj * T.n + i] = 0;
-  }
-  ATTerrain.stats(T);
+  // Sea: flat at sea level (some elevation tiles carry the sea floor). The natural ground (Tn) keeps everything else
+  // as measured; T is shaped below for the model.
+  const seaMask = lay.sea.length ? maskOf(T0, lay.sea) : null, waterMask = maskOf(T0, [...lay.sea, ...lay.water], lay.waterways.filter(w => !w.tunnel));
+  const Tn = { ...T0, z: Float32Array.from(T0.z) };
+  if (seaMask) for (let k = 0; k < Tn.z.length; k++) if (seaMask[k]) Tn.z[k] = 0;
+  ATTerrain.stats(Tn);
+  const T = ATTerrain.stats({ ...Tn, z: Float32Array.from(Tn.z) });
   const shaped = [];
   if ($('rBench').checked && lay.roads.length) { ATTerrain.benches(T, lay.roads.filter(r => r.car && !r.bridge && !r.tunnel && !r.area).map(r => ({ pts: r.pts, width: r.width }))); shaped.push('road benches'); }
   if ($('rChan').checked && lay.waterways.length) { ATTerrain.channels(T, lay.waterways.filter(w => !w.tunnel)); shaped.push('stream beds'); }
@@ -138,16 +138,16 @@ async function build() {
   await tick();
 
   step('analyse', 'run');
-  // Slope, aspect, wetness and flow describe the natural ground, before pads, benches and beds.
-  const A = ATTerrain.analyse(T0);
-  const rep = ATTerrain.report(T0, A);
+  // Slope, aspect, wetness, flow, flood and catchments describe the natural ground, before pads, benches and beds.
+  const A = ATTerrain.analyse(Tn, { water: waterMask, sea: seaMask });
+  const rep = ATTerrain.report(Tn, A);
   step('analyse', 'ok', `${A.streams.length} flow lines`);
   await tick();
 
   step('assemble', 'run');
   const cover = ATLand.raster(lay, buildings, half, 1024);
   const trees = want.t ? ATLand.trees(lay, cover, half, { s2: S2, max: SIZE >= 3000 ? 60000 : 45000 }) : [];
-  M = { site: o, half, T, T0, A, rep, lay, buildings, trees, cover, s2: S2, hist: H, ghsl: G, osmTime: j && j.osm3s ? j.osm3s.timestamp_osm_base : '', from: j ? j.from : {}, overture: OV ? OV.release : '', built: new Date() };
+  M = { site: o, half, T, T0: Tn, sea: seaMask, A, rep, cache: {}, lay, buildings, trees, cover, s2: S2, hist: H, ghsl: G, osmTime: j && j.osm3s ? j.osm3s.timestamp_osm_base : '', from: j ? j.from : {}, overture: OV ? OV.release : '', built: new Date() };
   M.interval = autoInterval(rep.relief);
   buildScene();
   step('assemble', 'ok', `${buildings.length.toLocaleString('en-US')} buildings · ${trees.length.toLocaleString('en-US')} trees`);
@@ -161,6 +161,18 @@ async function build() {
   ATools.track('terrain-model/build/' + SIZE);
 }
 const tick = () => new Promise(r => setTimeout(r, 0));
+// 0/1 mask of the grid nodes inside polygons or under lines (drawn on a canvas, one pixel per node).
+function maskOf(T, polys, lines = []) {
+  const n = T.n, c = document.createElement('canvas'); c.width = c.height = n;
+  const g = c.getContext('2d'), X = v => (v + T.half) / T.step + 0.5;
+  g.fillStyle = g.strokeStyle = '#000'; g.lineCap = g.lineJoin = 'round';
+  const path = r => r.forEach((p, i) => i ? g.lineTo(X(p[0]), X(p[1])) : g.moveTo(X(p[0]), X(p[1])));
+  polys.forEach(pg => { g.beginPath(); [pg.outer, ...(pg.holes || [])].forEach(r => { path(r); g.closePath(); }); g.fill('evenodd'); });
+  lines.forEach(w => { g.beginPath(); path(w.pts); g.lineWidth = Math.max(1, (w.width || 2) / T.step); g.stroke(); });
+  const d = g.getImageData(0, 0, n, n).data, m = new Uint8Array(n * n);
+  for (let k = 0; k < n * n; k++) m[k] = d[4 * k + 3] > 127 ? 1 : 0;
+  return m;
+}
 
 // OpenStreetMap first. Overture adds the buildings OSM does not have (a footprint whose middle is not inside an OSM
 // building), and stands in for roads, water and land cover when the OSM query for them failed.
@@ -212,7 +224,28 @@ const MAPS = {
   wet: { title: 'Wetness index (TWI)', breaks: [4, 6, 8, 10, 12], labels: ['< 4 dry', '4–6', '6–8', '8–10', '10–12', '> 12 wet'], ramp: ['#f4f1e8', '#e2e7e2', '#c7d8df', '#a3c2d4', '#7aa6c4', '#4f7fa8'] },
   ndvi: { title: 'Vegetation (NDVI)', breaks: [0.1, 0.25, 0.4, 0.55, 0.7], labels: ['< 0.1 bare, built', '0.1–0.25', '0.25–0.4', '0.4–0.55', '0.55–0.7', '> 0.7 dense'], ramp: ['#f1eee6', '#e7e5cf', '#d5dcb4', '#b9cc95', '#94b276', '#6d915a'] },
   hist: { title: 'Water history, % of months', breaks: [10, 50, 90], labels: ['< 10 rare', '10–50 seasonal', '50–90 frequent', '> 90 permanent'], ramp: ['#d9e6ee', '#a9c6da', '#6f9ec0', '#3f6f97'] },
+  tri: { title: 'Roughness (TRI), m', breaks: [0.5, 1, 2, 4, 8], labels: ['< 0.5 smooth', '0.5–1', '1–2', '2–4 rugged', '4–8', '> 8 very rugged'], ramp: ['#f5f2e9', '#e9e1cb', '#d9c7a4', '#c4a47c', '#a77f5c', '#7d5a45'] },
+  tpi: { title: 'Landform (TPI)', labels: ['Valley floor', 'Lower slope', 'Flat', 'Mid-slope', 'Upper slope', 'Ridge, crest'], ramp: ['#7aa6c4', '#bcd2dc', '#f4f1e8', '#e6dfcc', '#d8bf98', '#b98a5e'] },
+  curv: { title: 'Curvature (over 10 m)', breaks: [-2, -0.5, 0.5, 2], labels: ['Crests, strongly convex', 'Convex', 'Straight', 'Concave', 'Hollows, strongly concave'], ramp: ['#b98a5e', '#e1c9a3', '#f4f1e8', '#b9d0db', '#6f9ec0'] },
+  flood: { title: 'Height above streams and water (HAND)', breaks: [1, 2, 5, 10], labels: ['< 1 m', '1–2 m', '2–5 m', '5–10 m', '> 10 m, out of reach'], ramp: ['#2f6690', '#5f93ba', '#9cc0d8', '#d5e4ec', null] },
+  basins: { title: 'Catchments', ramp: ['#d9c5a0', '#b9cfa6', '#a9c6da', '#e2b9a6', '#c8bcd8', '#e6d79d', '#a7cdc3', '#d8b2c4', '#bfc79a', '#9fb8d6', '#e0c29a', '#b6d3b8'] },
+  slr: { title: 'Sea level rise', ramp: ['#2f6690', '#5f93ba', '#9cc0d8'] },
 };
+// IPCC AR6 WGI Table 9.9: global mean sea level rise against 1995–2014, metres.
+const SLR = {
+  2050: [['SSP1-2.6, median', 0.19], ['SSP2-4.5, median', 0.20], ['SSP5-8.5, upper likely', 0.29]],
+  2100: [['SSP1-2.6, median', 0.44], ['SSP2-4.5, median', 0.56], ['SSP5-8.5, upper likely', 1.01]],
+};
+const slrLevels = (sel = $('slrSel').value) => SLR[sel] ? SLR[sel].map(([name, rise]) => ({ name, rise, year: +sel })) : [{ name: 'Raised sea', rise: +sel.slice(1), year: '' }];
+// Flooded land by level for the chosen scenario: 0 dry, 1 flooded at the lowest level, 2 at the next, ...
+function slrClasses(sel = $('slrSel').value) {
+  if (!M.sea) return null;
+  const key = 'slr' + sel; if (M.cache[key]) return M.cache[key];
+  const lv = slrLevels(sel), cls = new Uint8Array(M.T0.z.length), area = [];
+  lv.forEach((l, q) => { const f = ATTerrain.inundate(M.T0, M.sea, l.rise); let c = 0; for (let k = 0; k < f.length; k++) if (f[k]) { c++; if (!cls[k]) cls[k] = q + 1; } area.push(c * M.T0.step ** 2); });
+  return (M.cache[key] = { cls, levels: lv, area });
+}
+const tpiClass = k => { const t = M.A.tpi[k] / (M.A.tpiSd || 1); return t <= -1 ? 0 : t <= -0.5 ? 1 : t < 0.5 ? (M.A.slope[k] < 5 ? 2 : 3) : t < 1 ? 4 : 5; };
 const classOf = (v, b) => { let k = 0; while (k < b.length && v >= b[k]) k++; return k; };
 function elevBreaks() { const T = M.T, c = 7, s = (T.max - T.min) / c; return [...Array(c - 1)].map((_, k) => T.min + s * (k + 1)); }
 // Colour of the analysis map at grid node k (or null).
@@ -222,6 +255,12 @@ function mapColor(kind) {
   if (kind === 'slope') return k => MAPS.slope.ramp[classOf(Math.tan(A.slope[k] * rad) * 100, MAPS.slope.breaks)];
   if (kind === 'aspect') return k => MAPS.aspect.ramp[A.aspect[k] < 0 || Math.tan(A.slope[k] * rad) < 0.03 ? 8 : Math.round(A.aspect[k] / 45) % 8];
   if (kind === 'wet') return k => MAPS.wet.ramp[classOf(A.twi[k], MAPS.wet.breaks)];
+  if (kind === 'tri') return k => MAPS.tri.ramp[classOf(A.tri[k], MAPS.tri.breaks)];
+  if (kind === 'tpi') return k => MAPS.tpi.ramp[tpiClass(k)];
+  if (kind === 'curv') return k => MAPS.curv.ramp[classOf(A.curv[k], MAPS.curv.breaks)];
+  if (kind === 'flood') return k => ((M.sea && M.sea[k]) || isNaN(A.hand[k]) ? null : MAPS.flood.ramp[classOf(A.hand[k], MAPS.flood.breaks)]);
+  if (kind === 'basins') return k => (A.basin[k] > 0 ? MAPS.basins.ramp[(A.basin[k] - 1) % MAPS.basins.ramp.length] : null);
+  if (kind === 'slr') { const r = slrClasses(); if (!r) return () => null; const ramp = r.levels.length > 1 ? MAPS.slr.ramp : [MAPS.slr.ramp[1]]; return k => (r.cls[k] ? ramp[r.cls[k] - 1] : null); }
   return null;
 }
 
@@ -249,7 +288,7 @@ function paint(px, { trees = false, buildings = true } = {}) {
     ['farmland', 'grass', 'park', 'orchard', 'vineyard', 'scrub', 'wood', 'wetland', 'sand'].forEach(cl => L.cover.filter(p => p.cls === cl).forEach(p => poly(p, st.cover[cl])));
   }
   const mc = mapColor(kind);
-  if (mc) { const cache = {}; grid((i, j) => { const col = mc(j * T.n + i); return cache[col] || (cache[col] = [...hex(col), 235]); }, T.n, true, true); }
+  if (mc) { const cache = {}, a = ['basins', 'slr', 'flood'].includes(kind) ? 200 : 235; grid((i, j) => { const col = mc(j * T.n + i); return col ? cache[col] || (cache[col] = [...hex(col), a]) : null; }, T.n, true, true); }
   if (kind === 'ndvi' && M.s2) { const s = M.s2, m = MAPS.ndvi; grid((i, j) => { const v = s.ndvi[j * s.n + i]; return isNaN(v) ? null : [...hex(m.ramp[classOf(v, m.breaks)]), 235]; }, s.n, false); }
   if ($('sShade').checked) {
     g.globalCompositeOperation = 'multiply';
@@ -506,7 +545,7 @@ function repaint() {
   }, 60);
 }
 seg('style', repaint);
-['mapOn', 'cInt', 'sRoads', 'sWater', 'sFlow', 'sShade'].forEach(id => $(id).addEventListener('change', repaint));
+['mapOn', 'slrSel', 'cInt', 'sRoads', 'sWater', 'sFlow', 'sShade'].forEach(id => $(id).addEventListener('change', repaint));
 $('sBuild').addEventListener('change', () => { if (parts.buildings) { parts.buildings.visible = $('sBuild').checked; repaint(); } });
 $('sTrees').addEventListener('change', () => { if (parts.trees) { parts.trees.visible = $('sTrees').checked; requestRender(); } });
 $('sGrid').addEventListener('change', () => { if (parts.frame) { parts.frame.visible = $('sGrid').checked; requestRender(); } });
@@ -518,6 +557,7 @@ $('vx').addEventListener('input', () => { $('vxV').textContent = '×' + (+$('vx'
 function legend() {
   if (!M) return;
   const kind = $('mapOn').value, el = $('legend'), N = M.T.n * M.T.n, T = M.T, A = M.A;
+  $('slrBox').hidden = kind !== 'slr';
   if (!kind) { el.innerHTML = ''; return; }
   const m = MAPS[kind]; let rows = [];
   const share = fn => { const c = new Array(m.ramp.length).fill(0); for (let k = 0; k < N; k++) c[fn(k)]++; return c.map(v => Math.round(100 * v / N) + '%'); };
@@ -525,6 +565,21 @@ function legend() {
   if (kind === 'slope') { const s = share(k => classOf(Math.tan(A.slope[k] * rad) * 100, m.breaks)); rows = m.ramp.map((col, i) => [col, m.labels[i], s[i]]); }
   if (kind === 'aspect') { const s = share(k => A.aspect[k] < 0 || Math.tan(A.slope[k] * rad) < 0.03 ? 8 : Math.round(A.aspect[k] / 45) % 8); rows = m.ramp.map((col, i) => [col, m.labels[i], s[i]]); }
   if (kind === 'wet') { const s = share(k => classOf(A.twi[k], m.breaks)); rows = m.ramp.map((col, i) => [col, m.labels[i], s[i]]); }
+  if (kind === 'tri') { const s = share(k => classOf(A.tri[k], m.breaks)); rows = m.ramp.map((col, i) => [col, m.labels[i], s[i]]); }
+  if (kind === 'tpi') { const s = share(tpiClass); rows = m.ramp.map((col, i) => [col, m.labels[i], s[i]]); }
+  if (kind === 'curv') { const s = share(k => classOf(A.curv[k], m.breaks)); rows = m.ramp.map((col, i) => [col, m.labels[i], s[i]]); }
+  if (kind === 'flood') {
+    const c = new Array(m.labels.length).fill(0); let land = 0, out = 0;
+    for (let k = 0; k < N; k++) { if (M.sea && M.sea[k]) continue; land++; if (isNaN(A.hand[k])) out++; else c[classOf(A.hand[k], m.breaks)]++; }
+    rows = m.labels.map((t, i) => [m.ramp[i] || 'transparent', t, Math.round(100 * c[i] / (land || 1)) + '%']).concat([['transparent', 'Drains out of the square first', Math.round(100 * out / (land || 1)) + '%']]);
+  }
+  if (kind === 'basins') rows = A.basins.slice(0, 12).map(b => [m.ramp[(b.id - 1) % m.ramp.length], `Catchment ${b.id}`, ha(b.area)]);
+  if (kind === 'slr') {
+    const r = slrClasses();
+    if (!r) { el.innerHTML = `<span class="lt">${m.title}</span><span class="lt" style="font-weight:400">There is no sea in this square.</span>`; return; }
+    const ramp = r.levels.length > 1 ? m.ramp : [m.ramp[1]];
+    rows = r.levels.map((l, i) => [ramp[i], `${l.name} · +${l.rise.toFixed(2)} m`, ha(r.area[i])]);
+  }
   if (kind === 'ndvi' || kind === 'hist') {
     const src = kind === 'ndvi' ? M.s2 && M.s2.ndvi : M.hist && M.hist.occ;
     if (!src) { el.innerHTML = `<span class="lt">${m.title}: not loaded</span>`; return; }
@@ -532,8 +587,15 @@ function legend() {
     rows = m.ramp.map((col, i) => [col, m.labels[i], (kind === 'hist' ? Math.round(100 * c[i] / src.length * 10) / 10 : Math.round(100 * c[i] / (tot || 1))) + '%']);
   }
   el.innerHTML = `<span class="lt">${m.title}</span><span class="lt" style="display:none"></span>` + rows.map(([c, t, v]) => `<i style="background:${c}"></i><span>${t}</span><span>${v}</span>`).join('') +
-    `<span class="lt" style="font-weight:400">${{ elev: 'Equal height bands across the site.', slope: 'Under 5% builds without terraces; over 15% needs retaining walls or stepped sections.', aspect: 'The direction each slope faces. South faces get the most sun in the northern hemisphere.', wet: 'High values gather water: valley floors, hollows. Read with the flow lines.', ndvi: `Sentinel-2, ${M.s2 ? M.s2.date : ''}. Dense, healthy green reads above 0.55.`, hist: 'Share of months the ground was under water, 1984–2021 (Landsat).' }[kind]}</span>`;
+    `<span class="lt" style="font-weight:400">${{ tri: 'Mean height difference to the ground 10 m around. Under 1 m is smooth; over 4 m is broken, rocky or terraced ground.',
+      tpi: `The ground against its surroundings within ${Math.round(A.tpiRadius)} m. Valleys gather water and cold air; ridges get the wind and the views.`,
+      curv: 'Hollows gather water and soil; crests shed them.',
+      flood: `How high the ground stands above the nearest stream, lake, sea or flow line draining over ${Math.round(Math.max(25e4, SIZE * SIZE / 16) / 1e4)} ha. Ground under 2 m beside a stream is likely flood plain. A screening map from the elevation model, not an official flood map.`,
+      basins: `${A.basins.length} catchment${A.basins.length === 1 ? '' : 's'} inside the square, each draining to one point: a stream junction, the edge of the square or the sea. Uncoloured strips along the edge drain straight out.`,
+      slr: SLR[$('slrSel').value] ? `IPCC AR6 global mean sea level rise by ${$('slrSel').value} against 1995–2014, on land connected to the sea. Land sinking, storm surges and the metre-scale accuracy of the elevation model are not included.` : 'The sea raised by this much, for example a rise plus a storm surge, on land connected to the sea.',
+      elev: 'Equal height bands across the site.', slope: 'Under 5% builds without terraces; over 15% needs retaining walls or stepped sections.', aspect: 'The direction each slope faces. South faces get the most sun in the northern hemisphere.', wet: 'High values gather water: valley floors, hollows. Read with the flow lines.', ndvi: `Sentinel-2, ${M.s2 ? M.s2.date : ''}. Dense, healthy green reads above 0.55.`, hist: 'Share of months the ground was under water, 1984–2021 (Landsat).' }[kind]}</span>`;
 }
+const ha = a => (a >= 1e6 ? (a / 1e6).toFixed(2) + ' km²' : a >= 1e4 ? (a / 1e4).toFixed(a >= 1e5 ? 0 : 1) + ' ha' : Math.round(a) + ' m²');
 function report() {
   const r = M.rep, b = M.buildings, known = b.filter(x => x.known).length, osmT = M.trees.filter(t => t.src === 'osm').length;
   const roadKm = M.lay.roads.filter(x => x.car).reduce((s, x) => s + x.pts.reduce((a, p, i) => i ? a + Math.hypot(p[0] - x.pts[i - 1][0], p[1] - x.pts[i - 1][1]) : 0, 0), 0) / 1000;
@@ -544,6 +606,10 @@ function report() {
     stat(b.length.toLocaleString('en-US'), `Buildings · ${b.length ? Math.round(100 * known / b.length) : 0}% with OSM height`) +
     stat(M.trees.length.toLocaleString('en-US'), `Trees and shrubs · ${osmT.toLocaleString('en-US')} mapped`) +
     stat(roadKm.toFixed(1) + ' km', 'Streets and roads') + stat(M.A.streams.length, 'Flow lines (> ' + Math.round(Math.max(2e4, SIZE * SIZE / 400) / 1e4) + ' ha)');
+  let low = 0, land = 0; for (let k = 0; k < M.A.hand.length; k++) { if (M.sea && M.sea[k]) continue; land++; if (M.A.hand[k] < 2) low++; }
+  const s100 = M.sea ? slrClasses('2100') : null;
+  $('stats').innerHTML += stat(Math.round(100 * low / (land || 1)) + '%', 'Ground under 2 m above streams or water') +
+    (s100 ? stat(ha(s100.area[2]), 'Land under the sea by 2100 (IPCC, high)') : stat(M.A.basins.length, 'Catchments'));
   const names = ['0–5% flat', '5–10% gentle', '10–15% moderate', '15–25% steep', '> 25% very steep'];
   $('slopeBars').innerHTML = r.classes.map((v, i) => `<span>${names[i]}</span><i style="width:${Math.max(1, v * 100)}%;opacity:${0.25 + i * 0.18}"></i><span>${Math.round(v * 100)}%</span>`).join('');
   const s2 = M.s2 ? `Sentinel-2 ${M.s2.date}. ` : '';
@@ -576,6 +642,11 @@ function exportScene({ trees = $('xTree').value } = {}) {
   [...M.lay.sea, ...M.lay.water].forEach(pg => [pg.outer, ...pg.holes].forEach(r => X.lines.push({ layer: layer('Water', [86, 132, 170]), pts: drape(clipR(r), 0.05), closed: true, name: pg.name || 'water' })));
   M.lay.waterways.filter(w => !w.tunnel).forEach(w => clipLine(w.pts, half).forEach(pts => X.lines.push({ layer: layer('Water::Streams', [86, 132, 170]), pts: drape(pts, 0.05), name: [w.kind, w.name].filter(Boolean).join(' ') })));
   if ($('sFlow').checked) M.A.streams.forEach(s => X.lines.push({ layer: layer('Water::Flow lines', [130, 170, 200]), pts: drape(s.pts, 0.05), name: Math.round(s.area / 1e4) + ' ha' }));
+  // Analysis outlines: flood band, catchments, sea level rise by 2100.
+  const AP = analysisPolys(), outline = (L, c, pg, name) => [pg.outer, ...pg.holes].forEach(r => X.lines.push({ layer: layer(L, c), pts: drape([...r, r[0]], 0.1), closed: true, name }));
+  AP.flood.filter(f => f.level === 2).forEach(f => f.polys.forEach(pg => outline('Analysis::Flood, under 2 m above water', [47, 106, 160], pg, 'under 2 m above water')));
+  AP.basins.forEach(b => b.polys.forEach(pg => outline('Analysis::Catchments', [90, 122, 74], pg, `catchment ${b.id} · ${ha(b.area)}`)));
+  AP.slr.filter(l => l.year === 2100).forEach(l => l.polys.forEach(pg => outline('Analysis::Sea level rise 2100', [47, 102, 144], pg, `${l.name} +${l.rise} m`)));
   // Roads and rails (centre lines and edges).
   M.lay.roads.filter(r => !r.tunnel).forEach(r => clipLine(r.pts, half).forEach(pts => {
     const L = r.car ? layer('Roads', [120, 120, 120]) : layer('Roads::Paths', [160, 160, 160]);
@@ -658,7 +729,9 @@ async function download(kind, btn) {
     if (kind === 'pdf') printPlan();
     if (kind === 'png') saveBlob(base() + '-view.png', await viewPng(), 'image/png');
     if (kind === 'pngplan') saveBlob(base() + '-plan.png', await new Promise(r => paint(4096, { trees: true }).toBlob(r)), 'image/png');
-    if (kind === 'tif' || kind === 'tifslope') saveBlob(base() + (kind === 'tif' ? '-elevation.tif' : '-slope.tif'), geoTiff(kind === 'tif' ? M.T.z : M.A.slope), 'image/tiff');
+    if (kind === 'tif' || kind === 'tifslope' || kind === 'tifhand') saveBlob(base() + { tif: '-elevation.tif', tifslope: '-slope.tif', tifhand: '-height-above-water.tif' }[kind], geoTiff({ tif: M.T.z, tifslope: M.A.slope, tifhand: M.A.hand }[kind]), 'image/tiff');
+    if (kind === 'shp') saveBlob(base() + '-shapefiles.zip', await shapeZip(), 'application/zip');
+    if (kind === 'kmz') saveBlob(base() + '.kmz', await kmz(), 'application/vnd.google-earth.kmz');
     if (kind === 'geojson') saveBlob(base() + '.geojson', geoJson(), 'application/geo+json');
     if (kind === 'kml') saveBlob(base() + '.kml', kml(), 'application/vnd.google-earth.kml+xml');
     if (kind === 'lsvg' || kind === 'ldxf') { const L = laser(); saveBlob(base() + `-laser-1to${$('lScale').value}.${kind === 'lsvg' ? 'svg' : 'dxf'}`, kind === 'lsvg' ? ATExport.laserSvg(L.sheets, L.W, L.H, L.title) : ATExport.laserDxf(L.sheets, L.W, L.H), kind === 'lsvg' ? 'image/svg+xml' : 'application/dxf'); }
@@ -693,7 +766,21 @@ function geoTiff(arr) {
   for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) data[j * n + i] = arr[(n - 1 - j) * n + i];
   return ATExport.geotiff(data, n, n, nw.lng, nw.lat, dLng, dLat);
 }
-function geoJson() {
+// Outlines of the flood bands, catchments and sea level rise, as polygons in local metres (cached per model).
+function slrPolys(sel) {
+  const key = 'slrp' + sel; if (M.cache[key]) return M.cache[key];
+  return (M.cache[key] = M.sea ? slrLevels(sel).map(l => ({ ...l, polys: ATTerrain.plateRegions(M.T0, 0.5, Float32Array.from(ATTerrain.inundate(M.T0, M.sea, l.rise))) })) : []);
+}
+function analysisPolys() {
+  if (M.cache.polys) return M.cache.polys;
+  const T = M.T0, N = T.z.length, A = M.A, neg = new Float32Array(N);
+  for (let k = 0; k < N; k++) neg[k] = M.sea && M.sea[k] ? -1e5 : -A.hand[k];
+  const flood = [1, 2, 5].map(L => ({ level: L, polys: ATTerrain.plateRegions(T, -L, neg) }));
+  const basins = A.basins.map(b => { const ind = new Float32Array(N); for (let k = 0; k < N; k++) ind[k] = A.basin[k] === b.id ? 1 : 0; return { ...b, polys: ATTerrain.plateRegions(T, 0.5, ind) }; });
+  return (M.cache.polys = { flood, basins, slr: ['2050', '2100'].flatMap(slrPolys) });
+}
+function geoJson() { const g = geoFeatures(); return JSON.stringify({ type: 'FeatureCollection', name: base(), attribution: g.attribution, features: g.features }); }
+function geoFeatures() {
   const Lc = ATUtm.local(M.site), ll = p => { const g = Lc.ll(p[0], p[1]); return [+g.lng.toFixed(7), +g.lat.toFixed(7)]; }, F = [], half = M.half;
   const ring = r => { const c = r.map(ll); c.push(c[0]); return c; };
   const ci = contourInterval() || M.interval;
@@ -705,7 +792,49 @@ function geoJson() {
   M.buildings.forEach(b => F.push({ type: 'Feature', properties: { layer: 'building', height: +(b.z1 - b.z0).toFixed(1), base: +b.z0.toFixed(2), height_source: b.known ? 'osm' : b.est || 'default', name: (b.tags && b.tags.name) || '' }, geometry: { type: 'Polygon', coordinates: [b.outer, ...b.holes].map(ring) } }));
   M.trees.forEach(t => F.push({ type: 'Feature', properties: { layer: 'tree', kind: t.kind, height: +t.h.toFixed(1), crown: +(2 * t.r).toFixed(1), source: t.src }, geometry: { type: 'Point', coordinates: ll([t.x, t.y]) } }));
   M.A.streams.forEach(s => F.push({ type: 'Feature', properties: { layer: 'flowline', catchment_ha: +(s.area / 1e4).toFixed(1) }, geometry: { type: 'LineString', coordinates: s.pts.map(ll) } }));
-  return JSON.stringify({ type: 'FeatureCollection', name: base(), attribution: '© OpenStreetMap contributors (ODbL)' + (M.overture ? '; Overture Maps Foundation' : '') + '; elevation ' + M.T.src, features: F });
+  const AP = analysisPolys(), poly = pg => ({ type: 'Polygon', coordinates: [pg.outer, ...pg.holes].map(ring) });
+  AP.flood.forEach(f => f.polys.forEach(pg => F.push({ type: 'Feature', properties: { layer: 'flood_zone', hand_max_m: f.level }, geometry: poly(pg) })));
+  AP.basins.forEach(b => b.polys.forEach(pg => F.push({ type: 'Feature', properties: { layer: 'catchment', id: b.id, area_ha: +(b.area / 1e4).toFixed(2) }, geometry: poly(pg) })));
+  AP.slr.forEach(l => l.polys.forEach(pg => F.push({ type: 'Feature', properties: { layer: 'sea_level_rise', year: l.year, scenario: l.name, rise_m: l.rise, source: 'IPCC AR6 WGI Table 9.9' }, geometry: poly(pg) })));
+  return { features: F, attribution: '© OpenStreetMap contributors (ODbL)' + (M.overture ? '; Overture Maps Foundation' : '') + '; elevation ' + M.T.src };
+}
+// Shapefiles (WGS 84) of every layer, zipped with a note on the sources.
+async function shapeZip() {
+  const g = geoFeatures(), files = ATGis.shapefiles(g.features, base() + '_');
+  files.push({ name: 'README.txt', data: `a_tools Terrain Model, ${M.site.name || ''} ${M.site.lat.toFixed(6)}, ${M.site.lng.toFixed(6)}, ${SIZE} m square.\r\nOne shapefile per layer, WGS 84 (EPSG:4326), attributes in UTF-8.\r\nflood_zone: ground at most hand_max_m above the nearest stream, lake or sea (screening, not an official flood map).\r\nsea_level_rise: IPCC AR6 global mean sea level rise against 1995-2014, land connected to the sea.\r\nData: ${g.attribution}.\r\n` });
+  return ATGis.zip(files);
+}
+// Google Earth: buildings extruded to their heights, roads, water, flow lines, the flood and catchment outlines and
+// the plan as a ground overlay.
+async function kmz() {
+  const Lc = ATUtm.local(M.site), h = M.half, esc = t => String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const LL = p => { const g = Lc.ll(p[0], p[1]); return g.lng.toFixed(7) + ',' + g.lat.toFixed(7); };
+  const co = (r, alt = 0, close = true) => (close ? [...r, r[0]] : r).map(p => LL(p) + ',' + alt.toFixed(1)).join(' ');
+  const ring = (r, alt) => `<LinearRing><coordinates>${co(r, alt)}</coordinates></LinearRing>`;
+  const poly = (pg, alt, ext) => `<Polygon>${ext ? '<extrude>1</extrude><altitudeMode>relativeToGround</altitudeMode>' : '<tessellate>1</tessellate>'}<outerBoundaryIs>${ring(pg.outer, alt)}</outerBoundaryIs>${pg.holes.map(r => `<innerBoundaryIs>${ring(r, alt)}</innerBoundaryIs>`).join('')}</Polygon>`;
+  const line = pts => `<LineString><tessellate>1</tessellate><coordinates>${co(pts, 0, false)}</coordinates></LineString>`;
+  const pm = (style, geom, name = '') => `<Placemark>${name ? `<name>${esc(name)}</name>` : ''}<styleUrl>#${style}</styleUrl>${geom}</Placemark>`;
+  const folder = (name, body, open = 0) => body ? `<Folder><name>${esc(name)}</name><open>${open}</open>${body}</Folder>` : '';
+  const style = (id, line, fill) => `<Style id="${id}"><LineStyle><color>${line[0]}</color><width>${line[1]}</width></LineStyle><PolyStyle>${fill ? `<color>${fill}</color>` : '<fill>0</fill>'}</PolyStyle></Style>`;
+  const AP = analysisPolys(), half = M.half;
+  const nw = Lc.ll(-h, h), se = Lc.ll(h, -h);
+  const png = new Uint8Array(await (await new Promise(r => paint(2048, { trees: true, buildings: false }).toBlob(r, 'image/png'))).arrayBuffer());
+  const doc = `<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2"><Document><name>${esc(base())}</name><open>1</open>
+<description>a_tools Terrain Model. ${esc(geoFeatures().attribution)}.</description>
+${style('site', ['ff3d55c8', 2])}${style('bld', ['ff6b6b6b', 1], 'ffece8e0')}${style('road', ['ffffffff', 2])}${style('path', ['ffcfd8dc', 1])}${style('water', ['ffc2885a', 1], '99d6b07a')}${style('stream', ['ffc2885a', 2])}${style('flow', ['ffe0b070', 2])}${style('flood', ['ffa06a2f', 1], '66a06a2f')}${style('basin', ['ff5a7a4a', 2])}${style('slr', ['ff90662f', 1], '5590662f')}
+<GroundOverlay><name>Plan (${esc($('mapOn').selectedOptions[0].text)})</name><Icon><href>files/plan.png</href></Icon><LatLonBox><north>${nw.lat.toFixed(7)}</north><south>${se.lat.toFixed(7)}</south><east>${se.lng.toFixed(7)}</east><west>${nw.lng.toFixed(7)}</west></LatLonBox></GroundOverlay>
+${pm('site', `<LineString><tessellate>1</tessellate><coordinates>${co([[-h, -h], [h, -h], [h, h], [-h, h]])}</coordinates></LineString>`, `Site square ${SIZE} m`)}
+${folder('Buildings', M.buildings.map(b => pm('bld', poly(b, b.z1 - b.z0, true), `${(b.tags && b.tags.name) || 'Building'} · ${Math.round(b.z1 - b.z0)} m`)).join(''))}
+${folder('Roads', M.lay.roads.filter(r => !r.tunnel).flatMap(r => clipLine(r.pts, half).map(pts => pm(r.car ? 'road' : 'path', line(pts), r.name || r.kind))).join(''))}
+${folder('Water', [...M.lay.sea, ...M.lay.water].map(pg => pm('water', poly({ outer: clipSquare(pg.outer, half), holes: pg.holes.map(r => clipSquare(r, half)).filter(r => r.length > 2) }, 0), pg.name || 'Water')).join('') + M.lay.waterways.filter(w => !w.tunnel).flatMap(w => clipLine(w.pts, half).map(pts => pm('stream', line(pts), w.name || w.kind))).join(''))}
+${folder('Flow lines', M.A.streams.map(f => pm('flow', line(f.pts), Math.round(f.area / 1e4) + ' ha')).join(''))}
+${folder('Flood: under 2 m above water', AP.flood.filter(f => f.level === 2).flatMap(f => f.polys.map(pg => pm('flood', poly(pg, 0)))).join(''))}
+${folder('Catchments', AP.basins.flatMap(b => b.polys.map(pg => pm('basin', poly(pg, 0), `Catchment ${b.id} · ${ha(b.area)}`))).join(''))}
+${folder('Sea level rise 2100 (IPCC AR6)', AP.slr.filter(l => l.year === 2100).flatMap(l => l.polys.map(pg => pm('slr', poly(pg, 0), `${l.name} +${l.rise} m`))).join(''))}
+</Document></kml>
+`;
+  return ATGis.zip([{ name: 'doc.kml', data: doc }, { name: 'files/plan.png', data: png }]);
 }
 function kml() {
   const Lc = ATUtm.local(M.site), h = M.half, c = [[-h, -h], [h, -h], [h, h], [-h, h], [-h, -h]].map(p => { const g = Lc.ll(p[0], p[1]); return `${g.lng.toFixed(7)},${g.lat.toFixed(7)},0`; }).join(' ');
@@ -755,6 +884,10 @@ function planSvg() {
     rs.filter(r => r.car).map(r => `<path d="${d(r.pts)}" fill="none" stroke="#ffffff" stroke-width="${Math.max(0.15, r.width * mm).toFixed(2)}" stroke-linecap="round" stroke-linejoin="round"/>`).join('') +
     rs.filter(r => !r.car).map(r => `<path d="${d(r.pts)}" fill="none" stroke="#8d877b" stroke-width="0.18" stroke-dasharray="0.8 0.5"/>`).join('') +
     L.rails.filter(r => !r.tunnel).map(r => `<path d="${d(r.pts)}" fill="none" stroke="#1b1b19" stroke-width="0.3" stroke-dasharray="2 1"/>`).join(''));
+  if (['flood', 'basins', 'slr'].includes(kind)) {
+    const AP = analysisPolys(), pgs = kind === 'flood' ? AP.flood.filter(f => f.level === 2).flatMap(f => f.polys) : kind === 'basins' ? AP.basins.flatMap(b => b.polys) : slrPolys($('slrSel').value).flatMap(l => l.polys);
+    s += layerG('Analysis outlines', pgs.map(pg => `<path d="${dp(pg)}" fill="none" stroke="#2f6690" stroke-width="0.25"/>`).join(''));
+  }
   if ($('sFlow').checked) s += layerG('Flow lines', M.A.streams.map(f => `<path d="${d(f.pts)}" fill="none" stroke="#5f8fb5" stroke-width="${Math.max(0.15, Math.log10(f.area / 1e4 + 1) * 0.35).toFixed(2)}" stroke-linecap="round"/>`).join(''));
   s += layerG('Trees', M.trees.filter(t => t.kind !== 'shrub' || t.r * mm > 0.3).map(t => `<circle cx="${X(t.x)}" cy="${Y(t.y)}" r="${Math.max(0.2, t.r * mm).toFixed(2)}"/>`).join(''), `fill="#7d9468" fill-opacity="0.35" stroke="#5d7350" stroke-width="0.06"`);
   s += layerG('Buildings', M.buildings.map(b => `<path d="${dp(b)}" fill-rule="evenodd"/>`).join(''), `fill="#2b2a27"`);
@@ -804,7 +937,7 @@ function mapImage(kind) {
   const g = c.getContext('2d'), im = g.createImageData(n, n), hex = h => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)];
   if (kind === 'ndvi') { const s = M.s2, m = MAPS.ndvi; c.width = c.height = s.n; const im2 = g.createImageData(s.n, s.n); for (let q = 0; q < s.n * s.n; q++) { const v = s.ndvi[q]; if (isNaN(v)) continue; const [r, gg, b] = hex(m.ramp[classOf(v, m.breaks)]); im2.data.set([r, gg, b, 255], 4 * q); } g.putImageData(im2, 0, 0); return c.toDataURL('image/png'); }
   const mc = mapColor(kind); if (!mc) return null;
-  for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) { const [r, gg, b] = hex(mc((n - 1 - j) * n + i)); im.data.set([r, gg, b, 255], 4 * (j * n + i)); }
+  for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) { const col = mc((n - 1 - j) * n + i); if (!col) continue; const [r, gg, b] = hex(col); im.data.set([r, gg, b, 255], 4 * (j * n + i)); }
   g.putImageData(im, 0, 0); return c.toDataURL('image/png');
 }
 function printPlan() {
