@@ -86,7 +86,7 @@ An editable space list (area, number, zone) from templates (house, primary schoo
 
 All tools share `assets/atools.css` and `assets/atools.js`. Calculations used by more than one tool live in `assets/lib/`: `sun.js` (sun position, sun path), `climate.js` (Open-Meteo download, climate summary, charts, design notes) `fabric.js` (OSM buildings, figure-ground drawing, building masses with heights, roof stripping for the elevation model) and `model.js` (3D meshes and OBJ / DXF / STL writers). Also, the site set on the hub (or in any tool) is stored in the browser and reused by the others.
 
-Each tool is a single static HTML file with no build step. Open it in a browser or serve the repo with any static host.
+Each tool is a single static HTML file with no build step. Regression checks live in `tests/` (see `tests/README.md`) and run on every push. Open it in a browser or serve the repo with any static host.
 
 Data: map tiles © OpenStreetMap contributors (openstreetmap.org standard tiles, greyed in CSS); buildings via the Overpass API; place search via Nominatim. Neighbour heights come from OSM `height` / `building:levels` tags and are often missing, so the tool falls back to an editable default.
 

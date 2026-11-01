@@ -1,0 +1,7 @@
+{
+  "name": "a-tools-tests",
+  "private": true,
+  "description": "Regression checks for a_tools. All network calls are mocked.",
+  "scripts": { "test": "node unit.js && node browser.js" },
+  "devDependencies": { "earcut": "2.2.4", "leaflet": "1.9.4", "playwright": "1.49.1" }
+}
