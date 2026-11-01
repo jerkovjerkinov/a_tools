@@ -181,7 +181,7 @@ async function run() {
     (nwr["building"];way["highway"];way["railway"~"^(rail|tram|subway|light_rail|narrow_gauge)$"];
      node["highway"="bus_stop"];node["public_transport"];node["railway"~"^(station|halt|tram_stop|subway_entrance)$"];nwr["amenity"~"^(ferry_terminal|bus_station)$"];
      nwr["landuse"];nwr["leisure"];nwr["natural"~"^(water|wood|scrub|grassland|beach|tree|tree_row)$"];nwr["place"="square"];nwr["waterway"="riverbank"];
-     nwr["historic"];nwr["heritage"];way["natural"="coastline"];nwr["amenity"~"^(place_of_worship|townhall|theatre|arts_centre|library|university|courthouse|concert_hall)$"]["name"];nwr["tourism"~"^(attraction|museum|viewpoint|artwork|gallery)$"];nwr["man_made"~"^(tower|lighthouse)$"];
+     nwr["historic"];nwr["heritage"];way["natural"="coastline"];nwr["amenity"~"^(place_of_worship|townhall|theatre|arts_centre|library|university|courthouse|concert_hall)$"]["name"];nwr["tourism"~"^(attraction|museum|viewpoint|artwork|gallery)$"];nwr["man_made"~"^(tower|lighthouse)$"];nwr["wikidata"]["name"];
      node["amenity"];node["shop"];node["office"];); out geom;`;
   $('run').disabled = true; $('status').innerHTML = '<span class="spinner"></span>Loading OpenStreetMap data…';
   try {
@@ -233,9 +233,15 @@ function build(j, o, w, h, ghsl) {
     else if (t.landuse) D.landuse.push({ r: rings(el), t, kind: t.landuse });
     if (t.natural === 'tree_row' && el.geometry) el.geometry.forEach((g, i) => i % 2 || D.trees.push(P(g)));
     const civic = new RegExp('^(place_of_worship|townhall|theatre|arts_centre|library|university|courthouse|concert_hall)$').test(t.amenity || '');
-    if ((t.historic || t.heritage || /^(attraction|museum|viewpoint|artwork|gallery)$/.test(t.tourism || '') || /^(tower|lighthouse)$/.test(t.man_made || '') || civic) && t.name) {
-      const c = centre(el); if (inFrame(c)) D.marks.push({ p: c, name: t.name, rank: t.heritage || t.historic ? 3 : t.tourism || t.man_made ? 2 : 1,
-        kind: t.historic ? 'Historic ' + t.historic.replace(/_/g, ' ') : t.heritage ? 'Listed' : t.tourism ? t.tourism.replace(/_/g, ' ') : t.man_made ? t.man_made : t.amenity.replace(/_/g, ' '), listed: !!(t.heritage || t['heritage:operator']), wd: t.wikidata || '' });
+    // Squares and named parks of half a hectare or more are landmarks too (Kızılay had none: Güvenpark, Kızılay Meydanı).
+    const ring0 = el.type !== 'node' ? rings(el)[0] || [] : [], a0 = Math.abs(ring0.reduce((s, p, i) => { const q = ring0[(i + 1) % ring0.length]; return s + p[0] * q[1] - q[0] * p[1]; }, 0) / 2);
+    const square = t.place === 'square' || (t.highway === 'pedestrian' && t.area === 'yes'), park = /^(park|garden)$/.test(t.leisure || '') && a0 >= 5000;
+    // Anything with a Wikidata or Wikipedia entry, except streets, rails and boundaries.
+    const wiki = !!(t.wikidata || t.wikipedia) && !(t.highway && !square) && !t.railway && !t.route && !t.boundary && !t.waterway;
+    if ((t.historic || t.heritage || /^(attraction|museum|viewpoint|artwork|gallery)$/.test(t.tourism || '') || /^(tower|lighthouse)$/.test(t.man_made || '') || civic || square || park || wiki) && t.name && !ATFabric.genericName(t.name)) {
+      const base = t.heritage || t.historic ? 3 : t.tourism || t.man_made ? 2 : square || park ? 1.5 : 1;
+      const c = centre(el); if (c && inFrame(c)) D.marks.push({ p: c, name: t.name, rank: base + (wiki ? 1.5 : 0),
+        kind: t.historic ? 'Historic ' + t.historic.replace(/_/g, ' ') : t.heritage ? 'Listed' : t.tourism ? t.tourism.replace(/_/g, ' ') : t.man_made ? t.man_made : square ? 'square' : t.leisure ? t.leisure : (t.amenity || t.building || t.leisure || t.office || 'place').replace(/_/g, ' ').replace(/^yes$/, 'building'), listed: !!(t.heritage || t['heritage:operator']), wd: t.wikidata || '' });
     }
   });
   // Buildings: class from their own tags, then shops inside a residential building make it mixed, then landuse below fills the gaps.
@@ -261,7 +267,7 @@ function build(j, o, w, h, ghsl) {
   D.stops = D.stops.filter(s => inFrame(s.p));
   // De-duplicate stops of the same kind and name within 40 m (platforms on both sides of a street).
   D.stopsU = []; D.stops.forEach(s => { if (!D.stopsU.some(u => u.kind === s.kind && u.name === s.name && Math.hypot(u.p[0] - s.p[0], u.p[1] - s.p[1]) < 40)) D.stopsU.push(s); });
-  // Keep the 40 most notable (heritage first, then attractions, then civic buildings), numbered from the top, left to right.
+  // Keep the 40 most notable (heritage and Wikidata entries first, then attractions, squares and parks, then civic buildings), numbered from the top, left to right.
   const seen = new Set(); D.marks = D.marks.sort((a, b) => b.rank - a.rank).filter(m => { const k = m.name.toLowerCase(); if (seen.has(k)) return false; seen.add(k); return true; }).slice(0, 40)
     .sort((a, b) => a.p[1] === b.p[1] ? a.p[0] - b.p[0] : b.p[1] - a.p[1]);
   // Sea from the coastline (land on the left), closed along the frame; seaRings works on a square, so scale to it and back.

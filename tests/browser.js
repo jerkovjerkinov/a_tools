@@ -72,7 +72,8 @@ const runBtn = async (p, id = 'run') => { await p.click('#' + id); await p.waitF
     const p = await page(browser, 'tools/iso-map/index.html', { osm: J, elev: null, site });
     await p.click('#size button[data-v="300"]'); await runBtn(p);
     const s = await p.evaluate(() => ({ walls: data.blds.filter(b => b.wall).length, castleArea: data.blds.filter(b => b.t.historic === 'castle' && !b.t.building && !b.wall).length,
-      heritage: data.heritage.length, domes: data.blds.filter(b => b.mosque || b.dome).map(b => ({ part: !!b.part, mosque: !!b.mosque, tomb: !!b.tomb, h: b.h, top: b.geo && b.geo.top, z1: b.geo && b.geo.z1 })),
+      heritage: data.heritage.length, domes: data.blds.filter(b => b.mosque || b.dome).map(b => ({ part: !!b.part, mosque: !!b.mosque, tomb: !!b.tomb, h: b.h, z0: b.geo && b.geo.z0, top: b.geo && b.geo.top, z1: b.geo && b.geo.z1 })),
+      halls: data.blds.filter(b => b.hall).map(b => b.h), courts: data.blds.filter(b => b.court).map(b => b.h), pyrGrey: data.blds.filter(b => b.t['roof:shape'] === 'pyramidal' && !b.lm).length,
       minarets: data.spires.filter(sp => sp.minaret).map(sp => [sp.h, sp.cone]), domeParts: data.blds.filter(b => b.part && b.dome && b.parent).map(b => [b.h, b.parent.h, b.parent.hidden]), tris: model3d().parts.reduce((n, q) => n + q.tris.length, 0) }));
     if (name === 'cimenlik') {
       ok(s.walls > 20, `Çimenlik: city walls drawn as wall blocks (${s.walls})`);
@@ -80,11 +81,17 @@ const runBtn = async (p, id = 'run') => { await p.click('#' + id); await p.waitF
     } else if (name === 'selimiye') {
       ok(s.domeParts.length && s.domeParts.every(([h, ph]) => h > ph + 15), `Selimiye: the untagged dome part rises above the prayer hall (${JSON.stringify(s.domeParts)})`);
       ok(s.minarets.length === 4 && s.minarets.every(([h, c]) => h + c > 60), `Selimiye: minaret nodes scaled to the mosque (${JSON.stringify(s.minarets.map(([h, c]) => Math.round(h + c)))} m)`);
+      const d = s.domes.find(x => x.part && !x.tomb);
+      ok(s.halls.length === 1 && s.courts[0] === 8, `Selimiye: courtyard outline is 8 m arcades, prayer hall cut from it (${JSON.stringify(s.halls)} m)`);
+      ok(d && d.z0 >= s.halls[0] - 0.5 && d.top > 38 && d.top < 50, `Selimiye: the dome's drum starts at the hall roof, top ${d && Math.round(d.top)} m (real 43 m)`);
     } else {
       const d = s.domes.find(x => x.part);
       ok(d && d.top === 53 && d.z1 < 45, `Süleymaniye: dome on the main part, top 53 m (${JSON.stringify(d)})`);
       ok(!s.domes.some(x => !x.part && x.mosque), 'Süleymaniye: the mosque outline does not get a second dome');
       ok(s.domes.some(x => x.tomb), 'Süleymaniye: the türbe gets a dome');
+      ok(s.halls.length === 1 && s.courts[0] === 8, `Süleymaniye: courtyard outline is 8 m arcades, prayer hall cut from it (${JSON.stringify(s.halls)} m)`);
+      ok(d && d.z0 >= s.halls[0] - 0.5, `Süleymaniye: the dome's drum starts at the hall roof (from ${d && Math.round(d.z0)} m), not the ground`);
+      ok(s.pyrGrey === 0, `Süleymaniye: minaret bases are landmark colour (${s.pyrGrey} grey)`);
       ok(s.minarets.length === 4 && s.minarets.every(([h, c]) => h + c === 55), `Süleymaniye: 4 minarets, 55 m with cone (${JSON.stringify(s.minarets)})`);
     }
     ok(s.tris > 1000, `${name}: 3D model has ${s.tris} triangles`);
@@ -111,9 +118,13 @@ const runBtn = async (p, id = 'run') => { await p.click('#' + id); await p.waitF
     const osm = F.osm(170, 1500);
     osm.elements.push({ type: 'way', id: 990001, tags: { natural: 'coastline' }, geometry: [[-100, 300], [-120, 0], [-100, -300]].map(LL) });   // sea to the west
     osm.elements.push({ type: 'way', id: 990002, tags: { amenity: 'theatre', name: 'Test Theatre' }, geometry: box(20, 20, 40, 40) });
+    osm.elements.push({ type: 'way', id: 990003, tags: { leisure: 'park', name: 'Test Park' }, geometry: box(-80, -80, 0, 0) });   // 0.64 ha
+    osm.elements.push({ type: 'way', id: 990004, tags: { tourism: 'attraction', name: 'feribot' }, geometry: box(60, 60, 70, 70) });
+    osm.elements.push({ type: 'way', id: 990005, tags: { building: 'yes', name: 'Wiki Hall', wikidata: 'Q1' }, geometry: box(-40, 50, -20, 70) });
     const p = await page(browser, 'tools/urban-map/index.html', { osm });
     await runBtn(p);
-    const u = await p.evaluate(() => ({ sea: data.water.filter(w => w.t.natural === 'sea').length, theatre: data.marks.some(m => m.name === 'Test Theatre') }));
+    const u = await p.evaluate(() => ({ sea: data.water.filter(w => w.t.natural === 'sea').length, theatre: data.marks.some(m => m.name === 'Test Theatre'), park: data.marks.some(m => m.name === 'Test Park'), generic: data.marks.some(m => m.name === 'feribot'), wiki: data.marks.some(m => m.name === 'Wiki Hall' && m.rank > 2) }));
+    ok(u.park && u.wiki && !u.generic, `Urban Analysis Map: named parks and Wikidata places are landmarks, "feribot" is not (${JSON.stringify(u)})`);
     ok(u.sea > 0, `Urban Analysis Map: sea drawn from the coastline (${u.sea} areas)`);
     ok(u.theatre, 'Urban Analysis Map: a named theatre counts as a landmark');
     await p.evaluate(() => { window.print = () => {}; }); await p.click('#printAll');

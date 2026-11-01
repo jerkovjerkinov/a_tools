@@ -21,6 +21,12 @@ ok(og.every((z, k) => z - (10 + (k % n)) < 1.5), 'openGrid removes single-cell 1
 const peak = [...Array(n * n)].map((_, k) => (k === 5 * n + 5 ? 90 : 0)), op2 = F.openGrid(peak, n, 90, 200);
 ok(op2[5 * n + 5] >= 78, `openGrid keeps a narrow summit within 12 m (90 m peak → ${op2[5 * n + 5]} m; Ankara Kalesi was flattened)`);
 
+// GHSL in villages reads about 3 m (houses averaged with empty ground): houses are two storeys there (Şirince).
+ok(F.estimate({ building: 'house' }, 70, 12345, 3, 9, 3) === 6 && F.estimate({ building: 'yes' }, 120, 7, 4.2, 9, 3) === 6, 'GHSL under 5 m gives two-storey houses');
+ok(F.estimate({ building: 'yes' }, 30, 7, 3, 9, 3) === 3, 'GHSL under 5 m keeps a small shed at one storey');
+// Landmark names that only repeat the feature type are dropped (Çanakkale "feribot").
+ok(['feribot', 'Cami', 'park', 'otopark', 'çay bahçesi'].every(F.genericName) && !['Güvenpark', 'Kızılay Meydanı', 'Yalı Camii', 'Anıtkabir', '天坛'].some(F.genericName), 'generic landmark names filtered, real names kept');
+
 // Nearest-cell staircase: treads of equal values become a straight slope.
 const stairs = [...Array(60)].map((_, i) => 100 + 10 * Math.floor(i / 10));   // 10 m steps every 10 samples
 const ds = F.destair(stairs), jump = Math.max(...ds.slice(1).map((z, i) => Math.abs(z - ds[i])));

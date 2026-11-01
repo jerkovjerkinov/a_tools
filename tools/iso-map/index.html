@@ -301,7 +301,7 @@ function build(j, o, R) {
       if (/^(castle|fort|fortress|citywalls)$/.test(t.historic || '') && !t.building) D.heritage.push(...ps);
     }
     // Named places for labels.
-    if (t.name && (LMB(t) || t.place === 'square' || /^(park|garden)$/.test(t.leisure || '') || t.amenity === 'ferry_terminal' || /^(attraction|viewpoint|gallery)$/.test(t.tourism || ''))) {
+    if (t.name && !ATFabric.genericName(t.name) && (LMB(t) || t.place === 'square' || /^(park|garden)$/.test(t.leisure || '') || t.amenity === 'ferry_terminal' || /^(attraction|viewpoint|gallery)$/.test(t.tourism || ''))) {
       const c = el.type === 'node' ? P(el) : (ringsOf(el)[0] ? centroid(ringsOf(el)[0].outer) : el.geometry ? centroid(el.geometry.map(P)) : null);
       if (c && inside(c)) D.lmPts.push({ name: t.name, p: c, rank: LMB(t) ? 2 : t.place === 'square' || t.amenity === 'ferry_terminal' ? 1.5 : 1, a: el.type === 'node' ? 0 : Math.abs(area((ringsOf(el)[0] || { outer: [] }).outer)) });
     }
@@ -319,8 +319,33 @@ function build(j, o, R) {
       if (big) { if (!big.dome) big.mosque = true; b.mosque = false; }
     }
   });
+  // A large mosque mapped round its courtyard (an inner ring): the outline is the arcades (about 8 m) and a prayer hall is cut
+  // from it on the far side of the courtyard, about twice the dome wide, so the dome stands on the hall roof (Süleymaniye, Selimiye).
+  const isMosque = t => t.building === 'mosque' || (t.amenity === 'place_of_worship' && t.religion === 'muslim');
+  D.blds.filter(b => !b.part && !b.hidden && b.holes.length && b.a > 1500 && isMosque(b.t) && !num(b.t.height) && !num(b.t['building:levels'])).forEach(b => {
+    const hole = b.holes.slice().sort((x, y) => Math.abs(area(y)) - Math.abs(area(x)))[0], hc = centroid(hole);
+    const dq = D.blds.filter(q => q.parent === b && (q.dome || q.mosque) && q.t['tower:type'] !== 'minaret').sort((x, y) => y.a - x.a)[0];
+    const c0 = dq ? dq.c : centroid(b.outer), L = Math.hypot(c0[0] - hc[0], c0[1] - hc[1]); if (L < 5) return;
+    const u = [(c0[0] - hc[0]) / L, (c0[1] - hc[1]) / L], v = [-u[1], u[0]], pu = p => (p[0] - hc[0]) * u[0] + (p[1] - hc[1]) * u[1], pv = p => (p[0] - hc[0]) * v[0] + (p[1] - hc[1]) * v[1];
+    const e1 = Math.max(...hole.map(pu)), far = Math.max(...b.outer.map(pu)), Dm = dq ? 2 * Math.sqrt(dq.a / Math.PI) : 0;
+    const lo = dq ? Math.max(e1, pu(dq.c) - 1.05 * Dm) : e1, hi = dq ? Math.min(far, pu(dq.c) + 1.05 * Dm) : far;
+    const cv = dq ? pv(dq.c) : pv(c0), w = dq ? 1.05 * Dm : (hi - lo) * 0.6; if (hi - lo < 10) return;
+    const at = (a, bb) => [hc[0] + u[0] * a + v[0] * bb, hc[1] + u[1] * a + v[1] * bb];
+    const ring = clipConvex(b.outer, [at(lo, cv - w), at(hi, cv - w), at(hi, cv + w), at(lo, cv + w)]), ha = Math.abs(area(ring));
+    if (ring.length < 3 || ha < 200) return;
+    const hall = { outer: area(ring) < 0 ? ring.reverse() : ring, holes: [], t: { 'building:part': 'yes' }, id: b.id + '.1', c: centroid(ring), a: ha, lm: true, name: '', part: true, hall: true, parent: b, dome: false, mosque: !dq };
+    D.blds.push(hall); b.court = true; b.mosque = false; if (dq) dq.base = hall;
+  });
+  // A dome part on a kept outline starts from that outline's roof, not from the ground.
+  D.blds.forEach(q => { if (q.part && !q.base && q.parent && !q.parent.hidden && (q.dome || q.mosque) && q.t['tower:type'] !== 'minaret') q.base = q.parent; });
+  // Small buildings inside a landmark (minaret bases, fountains in a mosque yard) and at the foot of a minaret are part of it.
+  D.blds.filter(b => !b.lm && !b.part && !b.wall && b.a < 400).forEach(b => {
+    if (D.blds.some(L => L.lm && !L.part && !L.wall && !L.hidden && L.a > 3 * b.a && ATFabric.inside(b.c, L.outer) && !L.holes.some(h => ATFabric.inside(b.c, h)))
+      || (b.a < 80 && D.spires.some(sp => sp.minaret && Math.hypot(sp.p[0] - b.c[0], sp.p[1] - b.c[1]) < 6))) b.lm = true;
+  });
   // Spires that stand on a building start from its roof.
-  D.spires.forEach(sp => { const b = D.blds.find(b => !b.hidden && ATFabric.inside(sp.p, b.outer)); if (b) sp.on = b; });
+  // A minaret stands on the ground beside the hall (or on its own small base), never on the hall or courtyard roof.
+  D.spires.forEach(sp => { const b = D.blds.filter(b => !b.hidden && (!sp.minaret || b.a < 300) && ATFabric.inside(sp.p, b.outer)).sort((x, y) => x.a - y.a)[0]; if (b) sp.on = b; });
   // A named landmark point inside a building makes that building a landmark.
   D.lmPts.forEach(l => { const b = D.blds.find(b => !b.hidden && !b.wall && ATFabric.inside(l.p, b.outer)); if (b && l.rank >= 2) { b.lm = true; b.name = b.name || l.name; l.b = b;
     if (/t[üu]rbe|tomb|mausoleum|k[üu]mbet/i.test(l.name) && !b.t['roof:shape'] && b.a < 600) b.dome = b.tomb = true; } });
@@ -387,6 +412,7 @@ function heightOf(b, mode) {
   if (h && h > 0) return { h: Math.min(h, 300), m: Math.min(m, h - 0.5), known: true };
   if (lv && lv > 0) return { h: (lv + (num(t['roof:levels']) || 0)) * 3.2, m, known: true };
   // Monuments rarely carry heights in OSM: defaults by type (checked against Çimenlik, Süleymaniye, Selimiye, Galata).
+  if (b.court) return { h: 8, m, known: false };   // a mosque outline round its courtyard: the arcades, about 8 m
   const tt = t['tower:type'] || '';
   if (tt === 'minaret' || t['building:part'] === 'minaret') return { h: 45, m, known: false };
   if (t.man_made === 'tower' || t.building === 'tower') return { h: tt === 'clock' || /saat/i.test(t.name || '') ? 18 : 14, m, known: false };
@@ -394,9 +420,10 @@ function heightOf(b, mode) {
   if (t.building === 'mosque' || (t.amenity === 'place_of_worship' && t.religion === 'muslim')) return { h: Math.round(Math.min(24, Math.max(9, 4 + Math.sqrt(b.a) * 0.2))), m, known: false };
   if (b.tomb || /^(tomb|mausoleum)$/.test(t.building || '') || t.historic === 'tomb') return { h: Math.round(Math.min(14, Math.max(5, Math.sqrt(b.a) * 0.9))), m, known: false };
   if (/^(church|cathedral|chapel|synagogue)$/.test(t.building || '') || t.amenity === 'place_of_worship') return { h: 14, m, known: false };
+  if (b.hall) return { h: Math.round(Math.min(28, Math.max(10, 4 + Math.sqrt(b.parent.a) * 0.3))), m, known: false };   // Süleymaniye, Selimiye: about 26–28 m to the half-domes
   if (b.part && b.dome && b.parent) {   // an untagged dome part: a drum above the body, then the dome (Selimiye: about 46 m)
-    const Dm = 2 * Math.sqrt(b.a / Math.PI), body = heightOf(b.parent, mode).h;
-    return { h: body + 0.7 * Dm, m, known: false, autoDomeH: 0.45 * Dm };
+    const Dm = 2 * Math.sqrt(b.a / Math.PI), body = heightOf(b.base || b.parent, mode).h;
+    return { h: body + 0.55 * Dm, m, known: false, autoDomeH: 0.45 * Dm };
   }
   if (b.part) return { h: Math.max(m + 3.2, b.parent ? heightOf(b.parent, mode).h : 9), m, known: false };
   let fl;
@@ -405,6 +432,8 @@ function heightOf(b, mode) {
     // GHSL average building height of the 90 m cell, scaled by footprint (small sheds lower, large blocks higher), ±1 floor of jitter.
     const r = hash(b.id), k = b.a < 50 ? 0.6 : b.a < 150 ? 0.9 : b.a < 600 ? 1 : 1.1;
     fl = Math.max(b.a >= 80 ? 2 : 1, Math.round(Math.min(12, Math.max(1, g / 3.1 * k))) + (r % 3) - 1);
+    // Under 5 m GHSL averages houses with empty ground (Şirince reads 3 m): a house there is two storeys.
+    if (g < 5) fl = b.a >= 40 ? 2 : 1;
     if (/^(garage|garages|shed|kiosk|roof|hut|carport)$/.test(t.building || '')) fl = 1;
     if (/^(house|bungalow|detached|semidetached_house)$/.test(t.building || '')) fl = Math.min(fl, 2);
   } else if (mode === 'est') {
@@ -437,6 +466,16 @@ function densify(pts, maxLen, closed) {
   if (!closed && pts.length) out.push(pts[pts.length - 1]);
   return out;
 }
+// Clip a polygon to a convex counter-clockwise polygon (Sutherland–Hodgman).
+function clipConvex(sub, win) {
+  let out = sub;
+  win.forEach((a, i) => {
+    const b = win[(i + 1) % win.length], inn = p => (b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0]) >= 0, inp = out; out = [];
+    const X = (p, q) => { const d1 = (b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0]), d2 = (b[0] - a[0]) * (q[1] - a[1]) - (b[1] - a[1]) * (q[0] - a[0]), t = d1 / (d1 - d2); return [p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t]; };
+    inp.forEach((p, k) => { const q = inp[(k + 1) % inp.length]; if (inn(q)) { if (!inn(p)) out.push(X(p, q)); out.push(q); } else if (inn(p)) out.push(X(p, q)); });
+  });
+  return out;
+}
 // Cut a polyline to the square |x|,|y| <= R; returns the pieces inside.
 function clipLine(l, R) {
   const out = []; let cur = null;
@@ -467,6 +506,8 @@ function drawing() {
   D.blds.forEach(b => { const hh = heightOf(b, mode); b.h = hh.h; b.m = hh.m || 0; b.known = hh.known; b.autoDomeH = hh.autoDomeH || 0;
     // Base at the lowest ground; on a slope the height counts from the middle ground so the uphill side is not buried.
     const gs = hasT ? b.outer.map(p => gz(p[0], p[1])) : [0]; b.z0 = Math.min(...gs); b.h += (Math.max(...gs) - b.z0) / 2; });
+  // A dome part's drum starts at the roof it stands on (it used to rise from the ground as a full-height cylinder).
+  D.blds.forEach(b => { if (b.base && !num(b.t.min_height) && !num(b.t['building:min_level'])) b.m = Math.max(b.m, Math.min(b.base.z0 + b.base.h - b.z0, b.h - 4)); });
   // Minarets without a height scale with their mosque: 1.45 × its top, at least 45 m (Selimiye about 67 m, real 71 m).
   D.spires.filter(sp => sp.auto).forEach(sp => {
     const tops = D.blds.filter(b => (b.mosque || (b.parent && (b.parent.t.building === 'mosque' || b.parent.t.religion === 'muslim')) || b.t.building === 'mosque') && Math.hypot(b.c[0] - sp.p[0], b.c[1] - sp.p[1]) < 90).map(b => b.h);
@@ -566,7 +607,8 @@ function drawing() {
 
   // Buildings and trees, far to near.
   // A part standing on a kept outline (a dome on the prayer hall) is drawn right after that outline.
-  const items = D.blds.map(b => [b.parent && !b.parent.hidden ? Math.min(depth(b.c[0], b.c[1]), depth(b.parent.c[0], b.parent.c[1]) - 0.02) : depth(b.c[0], b.c[1]), 0, b]);
+  const key = b => b.parent && !b.parent.hidden ? Math.min(depth(b.c[0], b.c[1]), (b.base && b.base !== b.parent ? key(b.base) : depth(b.parent.c[0], b.parent.c[1])) - 0.02) : depth(b.c[0], b.c[1]);
+  const items = D.blds.map(b => [key(b), 0, b]);
   if (showTr) D.trees.forEach(p => items.push([depth(p[0], p[1]), 1, p]));
   D.spires.forEach(sp => items.push([depth(sp.p[0], sp.p[1]) - 0.01, 2, sp]));   // just in front of the building they stand on
   items.sort((a, b) => b[0] - a[0]);

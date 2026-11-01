@@ -101,6 +101,10 @@ function osmHeight(t, defH, floorH) {
 // Height for a building with no height in OSM. Type defaults for monuments and small buildings first, then the
 // GHSL average building height of its 90 m cell (g, metres, 0 when unknown) scaled by footprint area a, with ±1 floor
 // of jitter from the id so blocks don't look uniform; else defH. Returns metres.
+// A name that only repeats the feature type ("feribot", "cami", "park") is not a landmark name.
+const GENERIC = /^(feribot|ferry|iskele|pier|cami|camii|mescit|mosque|kilise|church|park|parkı|otopark|parking|meydan|meydanı|square|okul|school|kütüphane|library|müze|museum|kule|tower|anıt|monument|memorial|çeşme|fountain|heykel|statue|büst|bust|türbe|tomb|mezarlık|cemetery|bahçe|garden|playground|oyun parkı|çay bahçesi|wc|tuvalet|toilets)$/i;
+function genericName(n = '') { const s = n.trim().toLocaleLowerCase('tr'); return GENERIC.test(s) || (/^[a-zçğıöşüâîû]+$/.test(n.trim()) && n.trim().length < 12); }
+
 function estimate(t, a, id, g, defH, floorH = 3) {
   const tt = t['tower:type'] || '';
   if (tt === 'minaret' || t['building:part'] === 'minaret') return 45;
@@ -112,6 +116,8 @@ function estimate(t, a, id, g, defH, floorH = 3) {
   if (!(g > 0)) return defH;
   const k = a < 50 ? 0.6 : a < 150 ? 0.9 : a < 600 ? 1 : 1.1, r = Math.abs(Math.round(+String(id).replace(/\D/g, '').slice(-6) || 0)) % 3;
   let fl = Math.max(a >= 80 ? 2 : 1, Math.round(Math.min(12, Math.max(1, g / 3.1 * k))) + r - 1);
+  // Under 5 m GHSL averages houses with empty ground (villages read about 3 m): a house there is two storeys.
+  if (g < 5) fl = a >= 40 ? 2 : 1;
   if (/^(house|bungalow|detached|semidetached_house)$/.test(t.building || '')) fl = Math.min(fl, 2);
   return fl * floorH;
 }
@@ -277,5 +283,5 @@ function seaRings(ways, R) {   // ways in local metres; R = half-size of the squ
   return rings;
 }
 
-window.ATFabric = { seaRings, estimate, destair, destairGrid, openProfile, openGrid, load, parse, svg, stats, area, xy, signedArea, clean, inside, osmHeight, fetchMasses, masses };
+window.ATFabric = { seaRings, estimate, genericName, destair, destairGrid, openProfile, openGrid, load, parse, svg, stats, area, xy, signedArea, clean, inside, osmHeight, fetchMasses, masses };
 })();
